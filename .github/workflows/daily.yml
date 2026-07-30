@@ -1,0 +1,29 @@
+name: Daily WeChat Brief
+
+on:
+  schedule:
+    # 每天北京时间 08:00 = UTC 00:00
+    - cron: '0 0 * * *'
+  workflow_dispatch: # 允许手动点 Run workflow 测试
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Send daily brief
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          CITY_NAME: ${{ vars.CITY_NAME }}
+          LATITUDE: ${{ vars.LATITUDE }}
+          LONGITUDE: ${{ vars.LONGITUDE }}
+          TIMEZONE: Asia/Shanghai
+        run: node src/index.js
