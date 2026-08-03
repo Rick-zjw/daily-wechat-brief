@@ -2,9 +2,21 @@ name: Daily WeChat Brief
 
 on:
   schedule:
-    # 每天北京时间 08:30 = UTC 00:30
+    # 北京时间 08:30 = UTC 00:30（早报）
     - cron: '30 0 * * *'
-  workflow_dispatch: # 可在网页点 Run workflow 手动测
+    # 北京时间 18:10 = UTC 10:10（晚报）
+    - cron: '10 10 * * *'
+  workflow_dispatch:
+    inputs:
+      brief_slot:
+        description: '推送场次（auto / morning / evening）'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - morning
+          - evening
 
 jobs:
   push:
@@ -31,4 +43,5 @@ jobs:
           LATITUDE: ${{ vars.LATITUDE }}
           LONGITUDE: ${{ vars.LONGITUDE }}
           TIMEZONE: Asia/Shanghai
+          BRIEF_SLOT: ${{ inputs.brief_slot || 'auto' }}
         run: node src/index.js

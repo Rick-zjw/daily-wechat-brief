@@ -1,10 +1,10 @@
 /**
- * 每日资讯早报
+ * 每日资讯早/晚报
  * - 天气：Open-Meteo（今日）
  * - 黄历：今日宜忌 + 今日/未来七天节日（国内 + 国外主要国家，含节气）
- * - 资讯：中国新闻 / 科技新闻 / 全球大事（RSS，含摘要）
+ * - 资讯：中国新闻 / 科技新闻 / 全球大事（RSS；早/晚场错开选取）
  * - 格言：今日诗词 / 一言 API（中文；偶发英文会尝试翻译）
- * - 推送：SMTP 邮件（QQ / Gmail 等）
+ * - 推送：SMTP 邮件（北京时间 08:30 / 18:10 各一次）
  */
 
 import tls from 'node:tls'
@@ -672,20 +672,56 @@ async function fetchRssFeed(url, limit = 10) {
   return parseRssItems(xml, limit)
 }
 
-async function fetchNewsFromFeeds(feeds, limit = 10) {
+/** 早报 / 晚报：可用 BRIEF_SLOT=morning|evening|auto 强制指定 */
+function resolveBriefSlot() {
+  const forced = String(process.env.BRIEF_SLOT || 'auto').toLowerCase()
+  if (forced === 'morning' || forced === 'evening') return forced
+  const hour = Number(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: TIMEZONE,
+      hour: 'numeric',
+      hour12: false
+    }).format(new Date())
+  )
+  // 北京时间 12 点前算早报，之后算晚报
+  return hour < 12 ? 'morning' : 'evening'
+}
+
+function feedsForSlot(feeds, slot) {
+  // 晚场倒序优先，换一批源先入库，降低与早场撞车概率
+  return slot === 'evening' ? [...feeds].reverse() : [...feeds]
+}
+
+/**
+ * 同一批 RSS 池里，早/晚场交错取稿，避免两次推送标题一模一样。
+ * morning: 偶数位；evening: 奇数位优先，不够再用剩余。
+ */
+function selectNewsForSlot(pool, slot, limit = 10) {
+  if (!pool.length) return []
+  if (slot === 'morning') {
+    return pool.filter((_, i) => i % 2 === 0).slice(0, limit)
+  }
+  const odds = pool.filter((_, i) => i % 2 === 1)
+  const evens = pool.filter((_, i) => i % 2 === 0)
+  return [...odds, ...evens].slice(0, limit)
+}
+
+async function fetchNewsPool(feeds, poolSize = 28) {
   const collected = []
   const seen = new Set()
+  // 每个源多抓一些，拼成更大候选池
+  const perFeed = Math.max(8, Math.ceil(poolSize / Math.max(feeds.length, 1)) + 4)
 
   for (const feed of feeds) {
-    if (collected.length >= limit) break
+    if (collected.length >= poolSize) break
     try {
-      const items = await fetchRssFeed(feed, limit)
+      const items = await fetchRssFeed(feed, perFeed)
       for (const item of items) {
         const key = item.title.replace(/\s+/g, '').toLowerCase()
         if (seen.has(key)) continue
         seen.add(key)
         collected.push(item)
-        if (collected.length >= limit) break
+        if (collected.length >= poolSize) break
       }
     } catch (e) {
       console.warn(`RSS 失败，跳过 ${feed}:`, e.message)
@@ -694,11 +730,17 @@ async function fetchNewsFromFeeds(feeds, limit = 10) {
   return collected
 }
 
+async function fetchNewsFromFeeds(feeds, limit = 10, slot = 'morning') {
+  const pool = await fetchNewsPool(feedsForSlot(feeds, slot), Math.max(limit * 3, 28))
+  return selectNewsForSlot(pool, slot, limit)
+}
+
 // 中国新闻 / 科技 / 全球大事（多源兜底；国内源优先，保证本地和 Actions 都能抓到）
 const FEEDS_CHINA = [
   'https://www.chinanews.com.cn/rss/china.xml',
   'https://www.chinanews.com.cn/rss/scroll-news.xml',
   'https://www.chinanews.com.cn/rss/importnews.xml',
+  'https://www.chinanews.com.cn/rss/finance.xml',
   'https://news.google.com/rss?hl=zh-CN&gl=CN&ceid=CN:zh-Hans'
 ]
 
@@ -706,7 +748,8 @@ const FEEDS_TECH = [
   'https://36kr.com/feed',
   'https://www.solidot.org/index.rss',
   'https://www.ithome.com/rss/',
-  'https://sspai.com/feed'
+  'https://sspai.com/feed',
+  'https://www.geekpark.net/rss'
 ]
 
 const FEEDS_WORLD = [
@@ -1050,28 +1093,31 @@ ${markdownToHtml(content)}
 }
 
 async function main() {
-  console.log('开始生成每日早报...')
+  const slot = resolveBriefSlot()
+  const slotLabel = slot === 'morning' ? '早报' : '晚报'
+  console.log(`开始生成每日${slotLabel}...（BRIEF_SLOT=${slot}）`)
 
   const [weather, almanac, china, tech, world, quote] = await Promise.all([
     getWeather(),
     getAlmanac(),
-    fetchNewsFromFeeds(FEEDS_CHINA, 10),
-    fetchNewsFromFeeds(FEEDS_TECH, 10),
-    fetchNewsFromFeeds(FEEDS_WORLD, 10),
+    fetchNewsFromFeeds(FEEDS_CHINA, 10, slot),
+    fetchNewsFromFeeds(FEEDS_TECH, 10, slot),
+    fetchNewsFromFeeds(FEEDS_WORLD, 10, slot),
     getDailyQuote()
   ])
 
   console.log(
-    `抓取完成：宜「${almanac.yi}」· 今日节日 ${almanac.todayFestivals.length} · 未来有节日 ${almanac.upcoming.length} 天 · 中国 ${china.length} · 科技 ${tech.length} · 全球 ${world.length}`
+    `抓取完成：${slotLabel} · 宜「${almanac.yi}」· 今日节日 ${almanac.todayFestivals.length} · 未来有节日 ${almanac.upcoming.length} 天 · 中国 ${china.length} · 科技 ${tech.length} · 全球 ${world.length}`
   )
 
   const dateText = todayLabel()
   // 主题保留日期；正文不再重复大标题，以格言开场
-  const subject = `Rick的每日早报 · ${dateText}`
+  const subject = `Rick的每日${slotLabel} · ${dateText}`
   const content = buildContent({ weather, almanac, china, tech, world, quote, dateText })
 
   console.log('----- 预览 -----')
   console.log('主题:', subject)
+  console.log('场次:', slotLabel)
   console.log('格言:', `「${quote.text}」—— ${quote.author}`)
   console.log(content)
   console.log('---------------')
