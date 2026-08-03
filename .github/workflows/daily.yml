@@ -1,4 +1,4 @@
-name: Daily WeChat Brief
+name: Rick的每日新闻
 
 on:
   schedule:
