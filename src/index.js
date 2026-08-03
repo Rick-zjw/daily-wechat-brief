@@ -5,7 +5,7 @@
  * - 金价：国际现货金一句话（美元/盎司 + 折合人民币/克）
  * - 黄历：今日宜忌 + 今日/未来七天节日（国内 + 国外主要国家，含节气）
  * - 历史上的今天：免费中文接口（维基百科备用）
- * - 资讯：中国新闻 / 科技新闻 / 全球大事（RSS；早/晚场错开选取）
+ * - 资讯：中国新闻（前 5 条为前一天《新闻联播》要点，早/晚场错开）/ 科技 / 全球（RSS；英文自动译中；早/晚场错开）
  * - 格言：今日诗词 / 一言 API（中文；偶发英文会尝试翻译）
  * - 推送：SMTP 邮件（北京时间 08:30 / 18:10 各一次）
  */
@@ -601,6 +601,13 @@ function decodeXmlEntities(s) {
   return String(s)
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
     .replace(/&nbsp;/gi, ' ')
+    .replace(/&ldquo;/gi, '“')
+    .replace(/&rdquo;/gi, '”')
+    .replace(/&lsquo;/gi, '‘')
+    .replace(/&rsquo;/gi, '’')
+    .replace(/&mdash;/gi, '—')
+    .replace(/&ndash;/gi, '–')
+    .replace(/&hellip;/gi, '…')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -736,6 +743,161 @@ async function fetchNewsPool(feeds, poolSize = 28) {
 async function fetchNewsFromFeeds(feeds, limit = 10, slot = 'morning') {
   const pool = await fetchNewsPool(feedsForSlot(feeds, slot), Math.max(limit * 3, 28))
   return selectNewsForSlot(pool, slot, limit)
+}
+
+function formatYmd(parts) {
+  return `${parts.y}${pad2(parts.m)}${pad2(parts.d)}`
+}
+
+function cleanXinwenTitle(title) {
+  return String(title || '')
+    .replace(/^\[视频\]/, '')
+    .replace(/^完整版(?:\[视频\])?/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function isXinwenFullEpisode(title) {
+  const t = cleanXinwenTitle(title)
+  return /《?新闻联播》?\s*\d{8}/.test(t) || /新闻联播.*19\s*:\s*00/.test(t)
+}
+
+function parseXinwenDayPage(html) {
+  const items = []
+  const re =
+    /href="(https:\/\/tv\.cctv\.com\/\d{4}\/\d{2}\/\d{2}\/VIDE[^"]+)"[^>]*(?:title|alt)="([^"]+)"/gi
+  let m
+  while ((m = re.exec(html))) {
+    const url = m[1]
+    const title = cleanXinwenTitle(m[2])
+    if (!title || isXinwenFullEpisode(title)) continue
+    items.push({ title, url })
+  }
+  const seen = new Set()
+  return items.filter(it => {
+    if (seen.has(it.url)) return false
+    seen.add(it.url)
+    return true
+  })
+}
+
+function extractXinwenSummary(html) {
+  const text = stripHtml(html)
+  const main = text.match(
+    /主要内容\s*(?:央视网消息\s*(?:[（(]新闻联播[）)])?\s*[：:]?\s*)?(.{40,500})/
+  )
+  if (main) return truncateText(main[1].trim(), 220)
+  const brief = text.match(/视频简介\s*(.{20,400})/)
+  if (brief) return truncateText(brief[1].trim(), 220)
+  return ''
+}
+
+async function fetchXinwenItemSummary(url) {
+  try {
+    const html = await fetchJson(url, {
+      headers: { Accept: 'text/html,*/*' }
+    })
+    if (typeof html !== 'string') return ''
+    return extractXinwenSummary(html)
+  } catch (e) {
+    console.warn(`新闻联播条目摘要失败 ${url}:`, e.message)
+    return ''
+  }
+}
+
+/**
+ * 抓取指定日期《新闻联播》分条目录（央视网栏目日页）。
+ * 失败时向前再试几天，避免周末/延迟入库导致早报空白。
+ */
+async function fetchXinwenLianboList(daysBack = 1, lookback = 3) {
+  const today = getDateParts()
+  for (let i = daysBack; i <= daysBack + lookback - 1; i++) {
+    const parts = addDays(today, -i)
+    const ymd = formatYmd(parts)
+    const pageUrl = `https://tv.cctv.com/lm/xwlb/day/${ymd}.shtml`
+    try {
+      const html = await fetchJson(pageUrl, {
+        headers: { Accept: 'text/html,*/*' }
+      })
+      if (typeof html !== 'string') continue
+      const items = parseXinwenDayPage(html)
+      if (items.length) {
+        return { dateLabel: `${parts.y}-${pad2(parts.m)}-${pad2(parts.d)}`, ymd, items }
+      }
+      console.warn(`新闻联播 ${ymd} 日页无条目，继续回退`)
+    } catch (e) {
+      console.warn(`新闻联播日页失败 ${pageUrl}:`, e.message)
+    }
+  }
+  return null
+}
+
+/**
+ * 早/晚场错开取联播要点：早报取靠前，晚报优先取未在早报出现过的条目。
+ */
+function selectXinwenForSlot(items, slot, limit = 5) {
+  if (!items.length) return []
+  if (items.length <= limit) return items.slice(0, limit)
+  if (slot === 'morning') return items.slice(0, limit)
+
+  const morning = items.slice(0, limit)
+  const morningUrls = new Set(morning.map(it => it.url))
+  const rest = items.filter(it => !morningUrls.has(it.url))
+  if (rest.length >= limit) return rest.slice(0, limit)
+  if (rest.length) {
+    // 条数不够时，用靠后条目补齐，再不够才回落到早报条目
+    const need = limit - rest.length
+    const tailFill = items.slice(-limit).filter(it => !rest.some(r => r.url === it.url))
+    return [...rest, ...tailFill, ...morning].slice(0, limit)
+  }
+  const odds = items.filter((_, i) => i % 2 === 1)
+  const evens = items.filter((_, i) => i % 2 === 0)
+  return [...odds, ...evens].slice(0, limit)
+}
+
+async function enrichXinwenItems(items, dateLabel) {
+  const summaries = await Promise.all(items.map(it => fetchXinwenItemSummary(it.url)))
+  return items.map((it, i) => ({
+    title: it.title,
+    url: it.url,
+    summary:
+      summaries[i] ||
+      truncateText(`《新闻联播》${dateLabel} 要点：${it.title}`, 220)
+  }))
+}
+
+/** 中国新闻：前 5 条优先《新闻联播》，其余用 RSS 补齐；联播失败则全走 RSS */
+async function fetchChinaNews(limit = 10, slot = 'morning') {
+  const lianboCount = Math.min(5, limit)
+  let head = []
+  try {
+    const lianbo = await fetchXinwenLianboList(1, 3)
+    if (lianbo?.items?.length) {
+      const picked = selectXinwenForSlot(lianbo.items, slot, lianboCount)
+      head = await enrichXinwenItems(picked, lianbo.dateLabel)
+      console.log(
+        `新闻联播 ${lianbo.dateLabel}：目录 ${lianbo.items.length} 条，${slot === 'morning' ? '早报' : '晚报'}选用 ${head.length} 条`
+      )
+    } else {
+      console.warn('新闻联播未取到条目，中国新闻前段回退为 RSS')
+    }
+  } catch (e) {
+    console.warn('新闻联播抓取异常，回退 RSS:', e.message)
+  }
+
+  const restNeed = Math.max(0, limit - head.length)
+  if (!restNeed) return head
+
+  const headKeys = new Set(head.map(it => it.title.replace(/\s+/g, '').toLowerCase()))
+  const rss = await fetchNewsFromFeeds(FEEDS_CHINA, Math.max(restNeed * 2, 12), slot)
+  const rest = []
+  for (const item of rss) {
+    const key = item.title.replace(/\s+/g, '').toLowerCase()
+    if (headKeys.has(key)) continue
+    rest.push(item)
+    if (rest.length >= restNeed) break
+  }
+  return [...head, ...rest]
 }
 
 // 中国新闻 / 科技 / 全球大事（多源兜底；国内源优先，保证本地和 Actions 都能抓到）
@@ -984,10 +1146,12 @@ function isMostlyChinese(text) {
 
 async function translateToChinese(text) {
   // MyMemory 免费翻译（无需 key）；失败则返回原文
+  const q = truncateText(String(text || '').trim(), 450)
+  if (!q) return null
   try {
     const url =
       `https://api.mymemory.translated.net/get` +
-      `?q=${encodeURIComponent(text)}&langpair=en|zh-CN`
+      `?q=${encodeURIComponent(q)}&langpair=en|zh-CN`
     const data = await fetchJson(url)
     const translated = data?.responseData?.translatedText?.trim()
     if (translated && isMostlyChinese(translated)) return translated
@@ -995,6 +1159,49 @@ async function translateToChinese(text) {
     console.warn('翻译失败，跳过:', e.message)
   }
   return null
+}
+
+/** 标题/摘要若基本是英文，译成中文；失败则保留原文 */
+async function localizeNewsItem(item) {
+  let title = item.title || ''
+  let summary = item.summary || ''
+
+  if (title && !isMostlyChinese(title)) {
+    const t = await translateToChinese(title)
+    if (t) title = t
+  }
+  if (summary && !isMostlyChinese(summary)) {
+    const s = await translateToChinese(summary)
+    if (s) summary = truncateText(s, 220)
+  }
+  return { ...item, title, summary }
+}
+
+async function localizeNewsItems(items) {
+  // 逐条翻译，降低免费接口限流概率
+  const out = []
+  for (const item of items) {
+    out.push(await localizeNewsItem(item))
+  }
+  return out
+}
+
+/**
+ * 全球大事：中文源优先；英文稿自动翻译。
+ * 晚场仍错开选取，但不会把 BBC 英文源翻到最前灌满候选池。
+ */
+async function fetchWorldNews(limit = 10, slot = 'morning') {
+  const zhFeeds = FEEDS_WORLD.filter(f => !/bbci\.co\.uk\/news\/world/i.test(f))
+  const enFeeds = FEEDS_WORLD.filter(f => /bbci\.co\.uk\/news\/world/i.test(f))
+  const ordered = [...feedsForSlot(zhFeeds, slot), ...enFeeds]
+  const pool = await fetchNewsPool(ordered, Math.max(limit * 3, 28))
+  const picked = selectNewsForSlot(pool, slot, limit)
+  const localized = await localizeNewsItems(picked)
+  const translated = localized.filter(
+    (it, i) => it.title !== picked[i].title || it.summary !== picked[i].summary
+  ).length
+  if (translated) console.log(`全球大事：已翻译 ${translated} 条英文稿`)
+  return localized
 }
 
 async function fetchJinrishiciQuote() {
@@ -1331,9 +1538,9 @@ async function main() {
   const [weather, almanac, china, tech, world, quote, history, gold] = await Promise.all([
     getWeather(),
     getAlmanac(),
-    fetchNewsFromFeeds(FEEDS_CHINA, 10, slot),
+    fetchChinaNews(10, slot),
     fetchNewsFromFeeds(FEEDS_TECH, 10, slot),
-    fetchNewsFromFeeds(FEEDS_WORLD, 10, slot),
+    fetchWorldNews(10, slot),
     getDailyQuote(),
     getHistoryToday(4),
     getGoldPrice()
