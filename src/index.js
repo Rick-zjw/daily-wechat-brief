@@ -1,6 +1,7 @@
 /**
  * 每日资讯早报
- * - 天气：Open-Meteo（今日 + 未来一周）
+ * - 天气：Open-Meteo（今日）
+ * - 黄历：今日宜忌 + 今日/未来七天节日（国内 + 国外主要国家，含节气）
  * - 资讯：中国新闻 / 科技新闻 / 全球大事（RSS，含摘要）
  * - 格言：今日诗词 / 一言 API（中文；偶发英文会尝试翻译）
  * - 推送：SMTP 邮件（QQ / Gmail 等）
@@ -63,14 +64,372 @@ async function fetchJson(url, options = {}) {
   return res.text()
 }
 
-function formatDayLabel(isoDate) {
-  const d = new Date(`${isoDate}T12:00:00`)
-  return new Intl.DateTimeFormat('zh-CN', {
+function getDateParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date)
+  const map = Object.fromEntries(parts.filter(p => p.type !== 'literal').map(p => [p.type, p.value]))
+  return {
+    y: Number(map.year),
+    m: Number(map.month),
+    d: Number(map.day)
+  }
+}
+
+function addDays(parts, n) {
+  const dt = new Date(Date.UTC(parts.y, parts.m - 1, parts.d + n))
+  return {
+    y: dt.getUTCFullYear(),
+    m: dt.getUTCMonth() + 1,
+    d: dt.getUTCDate()
+  }
+}
+
+function pad2(n) {
+  return String(n).padStart(2, '0')
+}
+
+function formatDayLabel(parts) {
+  const d = new Date(Date.UTC(parts.y, parts.m - 1, parts.d, 12))
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'UTC',
     month: 'numeric',
     day: 'numeric',
     weekday: 'short'
   }).format(d)
+}
+
+function normalizeAlmanacItems(text) {
+  if (!text) return ''
+  return String(text)
+    .replace(/[|｜.．、，,/／]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function splitFestivalText(text) {
+  if (!text || /无数据|无/.test(text)) return []
+  return String(text)
+    .split(/[|｜\s、，,]+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .filter(s => s !== '无数据' && s !== '无')
+}
+
+// 公历常见节日（国内 + 国际日/国外常见节，补全接口可能漏掉的小节日）
+const SOLAR_FESTIVALS = {
+  '01-01': ['元旦', '新年'],
+  '01-06': ['主显节'],
+  '01-10': ['中国人民警察节'],
+  '01-25': ['罗伯特·彭斯之夜'],
+  '02-02': ['世界湿地日', '土拨鼠日'],
+  '02-14': ['情人节'],
+  '03-03': ['全国爱耳日'],
+  '03-05': ['学雷锋纪念日'],
+  '03-08': ['国际妇女节'],
+  '03-12': ['植树节'],
+  '03-14': ['圆周率日', '白色情人节'],
+  '03-15': ['国际消费者权益日'],
+  '03-17': ['圣帕特里克节'],
+  '03-21': ['世界森林日', '世界睡眠日', '世界诗歌日'],
+  '03-22': ['世界水日'],
+  '03-23': ['世界气象日'],
+  '03-24': ['世界防治结核病日'],
+  '04-01': ['愚人节'],
+  '04-07': ['世界卫生日'],
+  '04-22': ['世界地球日'],
+  '04-23': ['世界读书日', '莎士比亚纪念日'],
+  '04-26': ['世界知识产权日'],
+  '05-01': ['劳动节'],
+  '05-04': ['青年节', '星球大战日'],
+  '05-05': ['墨西哥五日节'],
+  '05-08': ['世界红十字日'],
+  '05-12': ['国际护士节'],
+  '05-15': ['国际家庭日'],
+  '05-18': ['国际博物馆日'],
+  '05-20': ['网络情人节'],
+  '05-31': ['世界无烟日'],
+  '06-01': ['儿童节'],
+  '06-05': ['世界环境日'],
+  '06-06': ['全国爱眼日', '瑞典国庆日'],
+  '06-08': ['世界海洋日'],
+  '06-12': ['俄罗斯国庆日'],
+  '06-14': ['世界献血日', '美国国旗日'],
+  '06-19': ['美国解放日'],
+  '06-21': ['夏至', '国际瑜伽日', '世界音乐日'],
+  '06-23': ['国际奥林匹克日'],
+  '06-26': ['国际禁毒日'],
+  '07-01': ['建党节', '香港回归纪念日', '加拿大国庆日'],
+  '07-04': ['美国独立日'],
+  '07-07': ['七七事变纪念日'],
+  '07-11': ['世界人口日'],
+  '07-14': ['法国国庆日'],
+  '08-01': ['建军节', '瑞士国庆日'],
+  '08-03': ['男人节'],
+  '08-09': ['新加坡国庆日'],
+  '08-12': ['国际青年日'],
+  '08-15': ['日本宣布无条件投降日', '印度独立日', '韩国光复节'],
+  '08-17': ['印度尼西亚独立日'],
+  '08-19': ['中国医师节'],
+  '08-26': ['全国律师咨询日'],
+  '08-31': ['马来西亚独立日'],
+  '09-03': ['中国人民抗日战争胜利纪念日'],
+  '09-07': ['巴西独立日'],
+  '09-10': ['教师节'],
+  '09-11': ['美国爱国日'],
+  '09-15': ['国际民主日'],
+  '09-16': ['国际臭氧层保护日', '墨西哥独立日'],
+  '09-18': ['九一八事变纪念日'],
+  '09-20': ['全国爱牙日'],
+  '09-21': ['国际和平日'],
+  '09-27': ['世界旅游日'],
+  '09-30': ['烈士纪念日'],
+  '10-01': ['国庆节', '国际音乐日'],
+  '10-03': ['德国统一日', '韩国开天节'],
+  '10-04': ['世界动物日'],
+  '10-05': ['世界教师日'],
+  '10-09': ['世界邮政日'],
+  '10-10': ['世界精神卫生日', '台湾双十节'],
+  '10-12': ['西班牙国庆日', '哥伦布日'],
+  '10-13': ['世界保健日'],
+  '10-16': ['世界粮食日'],
+  '10-17': ['国际消除贫困日'],
+  '10-24': ['联合国日', '程序员节'],
+  '10-26': ['奥地利国庆日'],
+  '10-31': ['万圣节'],
+  '11-01': ['万圣节翌日', '诸圣节'],
+  '11-02': ['万灵节'],
+  '11-05': ['英国烟火节'],
+  '11-08': ['中国记者节'],
+  '11-09': ['全国消防日'],
+  '11-11': ['光棍节', '停战纪念日', '退伍军人节'],
+  '11-17': ['国际大学生节'],
+  '11-19': ['国际男人节'],
+  '11-25': ['国际消除对妇女的暴力日'],
+  '11-28': ['阿尔巴尼亚独立日'],
+  '11-30': ['苏格兰圣安德鲁节'],
+  '12-01': ['世界艾滋病日', '罗马尼亚国庆日'],
+  '12-03': ['国际残疾人日'],
+  '12-04': ['国家宪法日'],
+  '12-06': ['芬兰独立日', '西班牙宪法日'],
+  '12-10': ['世界人权日', '诺贝尔日'],
+  '12-12': ['墨西哥圣母节'],
+  '12-13': ['南京大屠杀死难者国家公祭日'],
+  '12-16': ['巴林国庆日'],
+  '12-18': ['卡塔尔国庆日'],
+  '12-20': ['澳门回归纪念日'],
+  '12-21': ['跨年日', '冬至'],
+  '12-24': ['平安夜'],
+  '12-25': ['圣诞节'],
+  '12-26': ['节礼日']
+}
+
+// 主要国家法定假日（Nager.Date，含感恩节/复活节等不固定日期）
+const FOREIGN_HOLIDAY_COUNTRIES = [
+  ['US', '美国'],
+  ['JP', '日本'],
+  ['KR', '韩国'],
+  ['GB', '英国'],
+  ['FR', '法国'],
+  ['DE', '德国'],
+  ['CA', '加拿大'],
+  ['AU', '澳大利亚'],
+  ['IT', '意大利'],
+  ['ES', '西班牙'],
+  ['RU', '俄罗斯'],
+  ['SG', '新加坡'],
+  ['TH', '泰国'],
+  ['IN', '印度'],
+  ['BR', '巴西'],
+  ['MX', '墨西哥'],
+  ['NL', '荷兰'],
+  ['SE', '瑞典'],
+  ['NZ', '新西兰'],
+  ['PH', '菲律宾']
+]
+
+const HOLIDAY_NAME_ZH = {
+  "New Year's Day": '元旦',
+  'New Year Holiday': '新年假期',
+  'Coming of Age Day': '成人节',
+  'Foundation Day': '建国纪念日',
+  "The Emperor's Birthday": '天皇诞辰',
+  'Vernal Equinox Day': '春分',
+  'Shōwa Day': '昭和之日',
+  'Constitution Memorial Day': '宪法纪念日',
+  "Greenery Day": '绿之日',
+  "Children's Day": '儿童节',
+  'Marine Day': '海之日',
+  'Mountain Day': '山之日',
+  'Respect for the Aged Day': '敬老之日',
+  'Autumnal Equinox Day': '秋分',
+  'Sports Day': '体育之日',
+  'Culture Day': '文化之日',
+  "Labour Thanksgiving Day": '勤劳感谢之日',
+  'Independence Movement Day': '三一节',
+  "Buddha's Birthday": '佛诞',
+  'Memorial Day': '阵亡将士纪念日',
+  'Liberation Day': '光复节',
+  'National Foundation Day': '开天节',
+  'Hangul Day': '韩文日',
+  'Christmas Day': '圣诞节',
+  'Boxing Day': '节礼日',
+  'Good Friday': '耶稣受难日',
+  'Easter Sunday': '复活节',
+  'Easter Monday': '复活节星期一',
+  'Ascension Day': '耶稣升天节',
+  'Whit Monday': '圣灵降临节翌日',
+  'Corpus Christi': '基督圣体节',
+  'Martin Luther King, Jr. Day': '马丁·路德·金纪念日',
+  'Presidents Day': '总统日',
+  "Washington's Birthday": '总统日',
+  "Lincoln's Birthday": '林肯诞辰',
+  'Independence Day': '独立日',
+  'Labour Day': '劳动节',
+  'Labor Day': '劳动节',
+  'Columbus Day': '哥伦布日',
+  'Veterans Day': '退伍军人节',
+  'Thanksgiving Day': '感恩节',
+  'Thanksgiving': '感恩节',
+  "Saint Patrick's Day": '圣帕特里克节',
+  "St. Patrick's Day": '圣帕特里克节',
+  'Bastille Day': '法国国庆日',
+  'German Unity Day': '德国统一日',
+  'Canada Day': '加拿大国庆日',
+  'Australia Day': '澳大利亚日',
+  'ANZAC Day': '澳新军团日',
+  "Queen's Birthday": '女王诞辰',
+  "King's Birthday": '国王诞辰',
+  'Remembrance Day': '停战纪念日',
+  'Armistice Day': '停战纪念日',
+  "All Saints' Day": '诸圣节',
+  'Assumption Day': '圣母升天节',
+  'Epiphany': '主显节',
+  'Carnival': '狂欢节',
+  'Republic Day': '共和国日',
+  'Constitution Day': '宪法日',
+  'National Day': '国庆日',
+  'Unity Day': '统一日',
+  'Freedom Day': '自由日',
+  'Victory Day': '胜利日',
+  'Defender of the Fatherland Day': '祖国保卫者日',
+  "International Women's Day": '国际妇女节',
+  'May Day': '劳动节',
+  'Spring and Labour Day': '劳动节',
+  'Russia Day': '俄罗斯日',
+  'Day of National Unity': '民族团结日',
+  'Cinco de Mayo': '墨西哥五日节',
+  'Day of the Dead': '亡灵节',
+  'Diwali': '排灯节',
+  'Deepavali': '排灯节',
+  Holī: '胡里节',
+  Holi: '胡里节',
+  Songkran: '泼水节',
+  'Makha Bucha': '万佛节',
+  'Visakha Bucha': '卫塞节',
+  'Chinese New Year': '春节',
+  'Hari Raya Puasa': '开斋节',
+  'Hari Raya Haji': '古尔邦节',
+  'Eid al-Fitr': '开斋节',
+  'Eid al-Adha': '古尔邦节',
+  'Vesak Day': '卫塞节',
+  'Summer Bank Holiday': '夏季银行假日',
+  'Spring Bank Holiday': '春季银行假日',
+  'Early May Bank Holiday': '五月初银行假日',
+  'Picnic Day': '野餐日',
+  'Civic Holiday': '公民日',
+  'Bank Holiday': '银行假日',
+  'Public Holiday': '公共假日'
+}
+
+function translateHolidayName(name) {
+  if (!name) return ''
+  return HOLIDAY_NAME_ZH[name] || name
+}
+
+function dedupeFestivals(list) {
+  const seen = new Set()
+  const unique = []
+  for (const name of list) {
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    unique.push(name)
+  }
+  return unique
+}
+
+function formatForeignFestivals(items) {
+  // items: [{ country, nameZh }]
+  const byName = new Map()
+  for (const { country, nameZh } of items) {
+    if (!nameZh) continue
+    if (!byName.has(nameZh)) byName.set(nameZh, [])
+    const countries = byName.get(nameZh)
+    if (!countries.includes(country)) countries.push(country)
+  }
+  return [...byName.entries()].map(([name, countries]) => {
+    if (countries.length === 1) return `${countries[0]}·${name}`
+    if (countries.length <= 4) return `${name}（${countries.join('、')}）`
+    return `${name}（${countries.slice(0, 3).join('、')}等${countries.length}国）`
+  })
+}
+
+async function fetchForeignHolidaysByDate(years) {
+  const byDate = new Map() // YYYY-MM-DD -> [{ country, nameZh }]
+
+  await Promise.all(
+    FOREIGN_HOLIDAY_COUNTRIES.map(async ([code, countryZh]) => {
+      for (const year of years) {
+        try {
+          const list = await fetchJson(
+            `https://date.nager.at/api/v3/PublicHolidays/${year}/${code}`
+          )
+          if (!Array.isArray(list)) continue
+          for (const h of list) {
+            if (!h?.date || !h?.name) continue
+            // 只要全国性节日，避免各省/州银行假日刷屏
+            if (h.global === false) continue
+            const nameZh = translateHolidayName(h.name)
+            if (!byDate.has(h.date)) byDate.set(h.date, [])
+            byDate.get(h.date).push({ country: countryZh, nameZh })
+          }
+        } catch (e) {
+          console.warn(`国外节日失败 ${code}/${year}:`, e.message)
+        }
+      }
+    })
+  )
+
+  return byDate
+}
+
+// 农历常见节日（按「月+日」中文，如 正月初一）
+const LUNAR_FESTIVALS = {
+  正月初一: ['春节'],
+  正月初七: ['人日'],
+  正月十五: ['元宵节'],
+  二月初二: ['龙抬头'],
+  二月十九: ['观音诞'],
+  三月初三: ['上巳节'],
+  四月初八: ['佛诞'],
+  五月初五: ['端午节'],
+  六月初六: ['天贶节', '姑姑节'],
+  六月十九: ['观音成道'],
+  六月廿四: ['关公诞'],
+  七月初七: ['七夕节'],
+  七月十五: ['中元节'],
+  七月三十: ['地藏节'],
+  八月十五: ['中秋节'],
+  九月初九: ['重阳节'],
+  十月初一: ['寒衣节'],
+  十月十五: ['下元节'],
+  腊月初八: ['腊八节'],
+  腊月廿三: ['北方小年'],
+  腊月廿四: ['南方小年'],
+  腊月三十: ['除夕']
 }
 
 async function getWeather() {
@@ -79,21 +438,12 @@ async function getWeather() {
     `?latitude=${LATITUDE}&longitude=${LONGITUDE}` +
     `&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m` +
     `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max` +
-    `&timezone=${encodeURIComponent(TIMEZONE)}&forecast_days=7`
+    `&timezone=${encodeURIComponent(TIMEZONE)}&forecast_days=1`
 
   const data = await fetchJson(url)
   const cur = data.current
   const daily = data.daily
   const code = cur.weather_code
-
-  const week = daily.time.map((date, i) => ({
-    date,
-    label: formatDayLabel(date),
-    desc: WMO[daily.weather_code[i]] || `天气代码 ${daily.weather_code[i]}`,
-    high: Math.round(daily.temperature_2m_max[i]),
-    low: Math.round(daily.temperature_2m_min[i]),
-    rainProb: daily.precipitation_probability_max[i]
-  }))
 
   return {
     today: {
@@ -101,11 +451,146 @@ async function getWeather() {
       temp: Math.round(cur.temperature_2m),
       humidity: cur.relative_humidity_2m,
       wind: cur.wind_speed_10m,
-      high: week[0].high,
-      low: week[0].low,
-      rainProb: week[0].rainProb
-    },
-    week
+      high: Math.round(daily.temperature_2m_max[0]),
+      low: Math.round(daily.temperature_2m_min[0]),
+      rainProb: daily.precipitation_probability_max[0]
+    }
+  }
+}
+
+async function fetchAlmanacDay(parts, foreignByDate = new Map()) {
+  const sun = `${parts.y}-${parts.m}-${parts.d}`
+  const date = `${parts.y}-${pad2(parts.m)}-${pad2(parts.d)}`
+  const json = await fetchJson(
+    `https://www.36jxs.com/api/Commonweal/almanac?sun=${encodeURIComponent(sun)}`
+  )
+  if (!json?.data) throw new Error(`黄历接口无数据: ${sun}`)
+  const data = json.data
+  const lunarKey = `${data.LMonth || ''}${data.LDay || ''}`
+  const mmdd = `${pad2(parts.m)}-${pad2(parts.d)}`
+  const domestic = dedupeFestivals([
+    ...splitFestivalText(data.GJie),
+    ...splitFestivalText(data.LJie),
+    ...splitFestivalText(data.SolarTermName),
+    ...(SOLAR_FESTIVALS[mmdd] || []),
+    ...(LUNAR_FESTIVALS[lunarKey] || [])
+  ])
+  const foreign = formatForeignFestivals(foreignByDate.get(date) || [])
+  // 与国内条目去重：已有「圣诞节 / 新加坡国庆日」时，不再重复国外同名
+  const domesticSet = new Set(domestic)
+  const foreignUnique = foreign.filter(name => {
+    if (domesticSet.has(name)) return false
+    const bare = name.replace(/^[^·]+·/, '').replace(/（[^）]+）$/, '')
+    if (domesticSet.has(bare)) return false
+    const withCountry = name.match(/^(.+)·(.+)$/)
+    if (withCountry) {
+      const [, country, fest] = withCountry
+      if (domesticSet.has(`${country}${fest}`)) return false
+      if (domesticSet.has(`${fest}（${country}）`)) return false
+    }
+    return true
+  })
+
+  return {
+    parts,
+    date,
+    label: formatDayLabel(parts),
+    lunar: `${data.LMonth || ''}${data.LDay || ''}`.trim(),
+    yi: normalizeAlmanacItems(data.Yi),
+    ji: normalizeAlmanacItems(data.Ji),
+    festivals: [...domestic, ...foreignUnique]
+  }
+}
+
+async function fetchApihzToday() {
+  // 接口盒子公共 ID/KEY 可能被限流；有自有密钥更稳
+  const id = process.env.APIHZ_ID || '88888888'
+  const key = process.env.APIHZ_KEY || '88888888'
+  const json = await fetchJson(
+    `https://cn.apihz.cn/api/time/getday.php?id=${encodeURIComponent(id)}&key=${encodeURIComponent(key)}`
+  )
+  if (!json?.yi && !json?.ji) {
+    throw new Error(json?.msg || '接口盒子黄历无宜忌数据')
+  }
+  return {
+    yi: normalizeAlmanacItems(json.yi),
+    ji: normalizeAlmanacItems(json.ji),
+    lunar: `${json.nyue || ''}${json.nri || ''}`.trim(),
+    festivals: [
+      ...splitFestivalText(json.jieri),
+      ...splitFestivalText(json.YIFESTIVAL),
+      ...splitFestivalText(json.jieqi)
+    ]
+  }
+}
+
+async function getAlmanac() {
+  const today = getDateParts()
+  const days = []
+  for (let i = 0; i < 8; i++) {
+    days.push(addDays(today, i))
+  }
+
+  const years = [...new Set(days.map(d => d.y))]
+  let foreignByDate = new Map()
+  try {
+    foreignByDate = await fetchForeignHolidaysByDate(years)
+  } catch (e) {
+    console.warn('国外节日总表获取失败:', e.message)
+  }
+
+  // 串行请求，避免公益接口被限流
+  const results = []
+  for (const parts of days) {
+    try {
+      results.push(await fetchAlmanacDay(parts, foreignByDate))
+    } catch (e) {
+      console.warn(`黄历失败 ${parts.y}-${parts.m}-${parts.d}:`, e.message)
+      const date = `${parts.y}-${pad2(parts.m)}-${pad2(parts.d)}`
+      const domestic = [...(SOLAR_FESTIVALS[`${pad2(parts.m)}-${pad2(parts.d)}`] || [])]
+      const foreign = formatForeignFestivals(foreignByDate.get(date) || [])
+      results.push({
+        parts,
+        date,
+        label: formatDayLabel(parts),
+        lunar: '',
+        yi: '',
+        ji: '',
+        festivals: dedupeFestivals([...domestic, ...foreign])
+      })
+    }
+  }
+
+  const todayInfo = results[0]
+
+  // 今日宜忌优先用接口盒子（字段更贴近常见黄历文案）
+  try {
+    const apihz = await fetchApihzToday()
+    if (apihz.yi) todayInfo.yi = apihz.yi
+    if (apihz.ji) todayInfo.ji = apihz.ji
+    if (apihz.lunar) todayInfo.lunar = apihz.lunar
+    for (const name of apihz.festivals) {
+      if (!todayInfo.festivals.includes(name)) todayInfo.festivals.push(name)
+    }
+  } catch (e) {
+    console.warn('接口盒子黄历不可用，沿用备用源:', e.message)
+  }
+
+  const upcoming = results.slice(1)
+    .map(d => ({
+      date: d.date,
+      label: d.label,
+      lunar: d.lunar,
+      festivals: d.festivals
+    }))
+    .filter(d => d.festivals.length > 0)
+
+  return {
+    yi: todayInfo.yi || '暂无',
+    ji: todayInfo.ji || '暂无',
+    lunar: todayInfo.lunar,
+    todayFestivals: todayInfo.festivals,
+    upcoming
   }
 }
 
@@ -329,9 +814,9 @@ function renderNewsSection(title, items) {
   return lines
 }
 
-function buildContent({ weather, china, tech, world, quote, dateText }) {
+function buildContent({ weather, almanac, china, tech, world, quote, dateText }) {
   const lines = []
-  const { today, week } = weather
+  const { today } = weather
 
   lines.push(`_${dateText}_`)
   lines.push('')
@@ -347,13 +832,26 @@ function buildContent({ weather, china, tech, world, quote, dateText }) {
   )
   lines.push('')
 
-  lines.push(`## 📅 ${CITY_NAME} · 未来一周`)
-  week.forEach((d, i) => {
-    const tag = i === 0 ? '今天' : d.label
-    lines.push(
-      `- **${tag}**：${d.desc} · ${d.low}°C ~ ${d.high}°C · 降水概率 ${d.rainProb}%`
-    )
-  })
+  lines.push('## 📜 今日黄历')
+  if (almanac.lunar) {
+    lines.push(`- 农历：${almanac.lunar}`)
+  }
+  lines.push(`- 宜：${almanac.yi}`)
+  lines.push(`- 忌：${almanac.ji}`)
+  lines.push(
+    `- 今日节日：${almanac.todayFestivals.length ? almanac.todayFestivals.join('、') : '无'}`
+  )
+  lines.push('')
+
+  lines.push('## 🎉 未来七天节日')
+  if (!almanac.upcoming.length) {
+    lines.push('_未来七天暂无节日_')
+  } else {
+    for (const d of almanac.upcoming) {
+      const lunar = d.lunar ? `（农历${d.lunar}）` : ''
+      lines.push(`- **${d.label}**${lunar}：${d.festivals.join('、')}`)
+    }
+  }
   lines.push('')
 
   lines.push(...renderNewsSection('🇨🇳 中国新闻', china))
@@ -554,8 +1052,9 @@ ${markdownToHtml(content)}
 async function main() {
   console.log('开始生成每日早报...')
 
-  const [weather, china, tech, world, quote] = await Promise.all([
+  const [weather, almanac, china, tech, world, quote] = await Promise.all([
     getWeather(),
+    getAlmanac(),
     fetchNewsFromFeeds(FEEDS_CHINA, 10),
     fetchNewsFromFeeds(FEEDS_TECH, 10),
     fetchNewsFromFeeds(FEEDS_WORLD, 10),
@@ -563,13 +1062,13 @@ async function main() {
   ])
 
   console.log(
-    `抓取完成：天气 ${weather.week.length} 天 · 中国 ${china.length} · 科技 ${tech.length} · 全球 ${world.length}`
+    `抓取完成：宜「${almanac.yi}」· 今日节日 ${almanac.todayFestivals.length} · 未来有节日 ${almanac.upcoming.length} 天 · 中国 ${china.length} · 科技 ${tech.length} · 全球 ${world.length}`
   )
 
   const dateText = todayLabel()
   // 主题保留日期；正文不再重复大标题，以格言开场
   const subject = `Rick的每日早报 · ${dateText}`
-  const content = buildContent({ weather, china, tech, world, quote, dateText })
+  const content = buildContent({ weather, almanac, china, tech, world, quote, dateText })
 
   console.log('----- 预览 -----')
   console.log('主题:', subject)
