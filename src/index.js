@@ -1,7 +1,10 @@
 /**
  * 每日资讯早/晚报
+ * - 开场：按星期 / 节日切换问候语（早/晚场文案不同）
  * - 天气：Open-Meteo（今日）
+ * - 金价：国际现货金一句话（美元/盎司 + 折合人民币/克）
  * - 黄历：今日宜忌 + 今日/未来七天节日（国内 + 国外主要国家，含节气）
+ * - 历史上的今天：免费中文接口（维基百科备用）
  * - 资讯：中国新闻 / 科技新闻 / 全球大事（RSS；早/晚场错开选取）
  * - 格言：今日诗词 / 一言 API（中文；偶发英文会尝试翻译）
  * - 推送：SMTP 邮件（北京时间 08:30 / 18:10 各一次）
@@ -769,6 +772,200 @@ function todayLabel() {
   }).format(new Date())
 }
 
+/** 北京时间星期：0=周日 … 6=周六 */
+function getWeekdayIndex(date = new Date()) {
+  const wd = new Intl.DateTimeFormat('en-US', {
+    timeZone: TIMEZONE,
+    weekday: 'short'
+  }).format(date)
+  return { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[wd] ?? 0
+}
+
+// 节日开场优先于星期开场；命中 todayFestivals 中任意关键字即可
+const FESTIVAL_GREETINGS = [
+  { keys: ['春节', '大年初一'], morning: '春节快乐，新岁启程，万事顺意。', evening: '春节快乐，灯火团圆，今晚也要开心。' },
+  { keys: ['除夕'], morning: '除夕将至，年味渐浓，记得给自己放个假。', evening: '除夕快乐，守岁团圆，愿岁岁平安。' },
+  { keys: ['元宵节', '元宵'], morning: '元宵节快乐，汤圆甜一点，心情也甜一点。', evening: '元宵夜赏灯，记得抬头看看月亮。' },
+  { keys: ['清明'], morning: '清明时节，适合走走停停，记得带把伞。', evening: '清明夜静，给惦念的人留一盏心灯。' },
+  { keys: ['端午节', '端午'], morning: '端午节安康，粽香四溢，记得吃粽子。', evening: '端午安康，艾草清香，今晚也要好好休息。' },
+  { keys: ['七夕'], morning: '七夕快乐，人间值得，也愿你被温柔以待。', evening: '七夕夜星河漫漫，愿有人陪你看月亮。' },
+  { keys: ['中秋节', '中秋'], morning: '中秋快乐，愿月圆人也圆。', evening: '中秋夜月色正好，记得抬头看一眼。' },
+  { keys: ['重阳'], morning: '重阳登高日，愿步步高升、安康顺意。', evening: '重阳夜，给长辈打个电话也很好。' },
+  { keys: ['国庆节', '国庆'], morning: '国庆快乐，山河无恙，日子有光。', evening: '国庆假期愉快，今晚放松一下也不错。' },
+  { keys: ['元旦', '新年'], morning: '元旦快乐，新的一年从今天开始发光。', evening: '元旦快乐，这一年，愿你被温柔接住。' },
+  { keys: ['劳动节'], morning: '劳动节快乐，休息也是生产力。', evening: '劳动节快乐，今晚属于你自己。' },
+  { keys: ['情人节', '网络情人节'], morning: '情人节快乐，爱自己也算数。', evening: '情人节快乐，今晚给喜欢的人留一句好话。' },
+  { keys: ['圣诞节', '平安夜'], morning: '圣诞快乐，愿你被善意环绕。', evening: '平安夜里，愿你心安、梦甜。' },
+  { keys: ['万圣节'], morning: '万圣节快乐，今天也可以小小地捣个蛋。', evening: '万圣夜到了，不给糖就捣蛋？' },
+  { keys: ['愚人节'], morning: '愚人节快乐，今天多笑一点，少被骗一点。', evening: '愚人节收工，今晚真相只有一个：好好休息。' },
+  { keys: ['男人节'], morning: '男人节快乐，今天也要善待自己。', evening: '男人节快乐，辛苦一天，记得给自己点赞。' },
+  { keys: ['妇女节'], morning: '妇女节快乐，愿每个她都被世界温柔以待。', evening: '妇女节快乐，今晚花开给你。' },
+  { keys: ['儿童节'], morning: '儿童节快乐，保留一点童心刚刚好。', evening: '儿童节快乐，今晚允许自己幼稚一点点。' },
+  { keys: ['教师节'], morning: '教师节快乐，传道授业，向光而行。', evening: '教师节快乐，向所有照亮过你的人致敬。' },
+  { keys: ['建军节'], morning: '八一建军节，致敬守护与担当。', evening: '建军节快乐，今晚也愿山河安宁。' },
+  { keys: ['建党节'], morning: '七一纪念日，初心如磐，步履不停。', evening: '七一将尽，愿理想照进日常。' }
+]
+
+const WEEKDAY_GREETINGS = {
+  morning: {
+    0: '周日早上好，慢一点也没关系，享受周末尾声。',
+    1: '周一加油，新的一周从好状态开始。',
+    2: '周二继续推进，稳稳地往前走就好。',
+    3: '周三了，一周过半，给自己一点小奖励。',
+    4: '周四坚持住，胜利在望。',
+    5: '周五快到了，收尾也是一种能力。',
+    6: '周六早上好，把节奏交给自己。'
+  },
+  evening: {
+    0: '周日晚报来了，明天又是新一周，今晚早些歇。',
+    1: '周一收工了，给自己一点缓冲时间。',
+    2: '周二晚上好，今天的事今天放下也行。',
+    3: '周三夜，过半了，明天继续不慌不忙。',
+    4: '周四晚上好，离周五只差一觉。',
+    5: '周五晚上好，辛苦一周，周末你好。',
+    6: '周六晚报，周末尚早，慢慢过。'
+  }
+}
+
+function buildOpeningGreeting(slot, festivals = []) {
+  const joined = festivals.join('、')
+  for (const item of FESTIVAL_GREETINGS) {
+    if (item.keys.some(k => joined.includes(k))) {
+      return slot === 'evening' ? item.evening : item.morning
+    }
+  }
+  const wd = getWeekdayIndex()
+  const table = WEEKDAY_GREETINGS[slot] || WEEKDAY_GREETINGS.morning
+  return table[wd] || table[1]
+}
+
+async function fetchHistoryFromXxapi() {
+  const data = await fetchJson('https://v2.xxapi.cn/api/history')
+  if (!Array.isArray(data?.data) || !data.data.length) return []
+  return data.data
+    .map(line => {
+      const raw = String(line || '').trim()
+      // 「2002年08月03日 事件」→ year + text
+      const m = raw.match(/^(\d{1,4})年\d{1,2}月\d{1,2}日\s*(.+)$/)
+      if (m) return { year: Number(m[1]), text: m[2].trim() }
+      return raw ? { year: null, text: raw } : null
+    })
+    .filter(Boolean)
+}
+
+async function fetchHistoryFromWikipedia(parts) {
+  const data = await fetchJson(
+    `https://api.wikimedia.org/feed/v1/wikipedia/zh/onthisday/events/${parts.m}/${parts.d}`
+  )
+  if (!Array.isArray(data?.events)) return []
+  return data.events
+    .map(ev => ({
+      year: ev.year ?? null,
+      text: String(ev.text || '').trim()
+    }))
+    .filter(ev => ev.text)
+}
+
+async function getHistoryToday(limit = 4) {
+  const parts = getDateParts()
+  let events = []
+  try {
+    events = await fetchHistoryFromXxapi()
+  } catch (e) {
+    console.warn('历史上的今天主源失败:', e.message)
+  }
+  if (!events.length) {
+    try {
+      events = await fetchHistoryFromWikipedia(parts)
+    } catch (e) {
+      console.warn('历史上的今天维基备用失败:', e.message)
+    }
+  }
+
+  // 优先近现代事件，再补足条数
+  const scored = events
+    .map(ev => ({
+      ...ev,
+      text: truncateText(ev.text, 90),
+      _score: typeof ev.year === 'number' ? ev.year : 0
+    }))
+    .sort((a, b) => b._score - a._score)
+
+  const picked = []
+  const seen = new Set()
+  for (const ev of scored) {
+    const key = ev.text.replace(/\s+/g, '')
+    if (seen.has(key)) continue
+    seen.add(key)
+    picked.push({ year: ev.year, text: ev.text })
+    if (picked.length >= limit) break
+  }
+  return picked
+}
+
+async function getGoldPrice() {
+  // 国际现货金（美元/盎司）+ 美元兑人民币 → 折合元/克
+  let usdPerOz = null
+  let updatedAt = ''
+  try {
+    const gold = await fetchJson('https://api.gold-api.com/price/XAU')
+    usdPerOz = Number(gold?.price)
+    updatedAt = gold?.updatedAt || ''
+    if (!Number.isFinite(usdPerOz) || usdPerOz <= 0) usdPerOz = null
+  } catch (e) {
+    console.warn('金价主源失败:', e.message)
+  }
+
+  if (usdPerOz == null) {
+    try {
+      const data = await fetchJson('https://mintedmetal.com/api/prices.json')
+      usdPerOz = Number(data?.metals?.gold?.price)
+      updatedAt = data?.updatedAt || ''
+      if (!Number.isFinite(usdPerOz) || usdPerOz <= 0) usdPerOz = null
+    } catch (e) {
+      console.warn('金价备用源失败:', e.message)
+    }
+  }
+
+  if (usdPerOz == null) return null
+
+  let cnyPerUsd = null
+  try {
+    const fx = await fetchJson('https://api.frankfurter.app/latest?from=USD&to=CNY')
+    cnyPerUsd = Number(fx?.rates?.CNY)
+    if (!Number.isFinite(cnyPerUsd) || cnyPerUsd <= 0) cnyPerUsd = null
+  } catch (e) {
+    console.warn('汇率获取失败，仅展示美元金价:', e.message)
+  }
+
+  const TROY_OZ_GRAMS = 31.1034768
+  const cnyPerGram =
+    cnyPerUsd != null ? (usdPerOz * cnyPerUsd) / TROY_OZ_GRAMS : null
+
+  return {
+    usdPerOz,
+    cnyPerGram,
+    cnyPerUsd,
+    updatedAt
+  }
+}
+
+function formatGoldLine(gold) {
+  if (!gold) return null
+  const usd = gold.usdPerOz.toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  })
+  if (gold.cnyPerGram != null) {
+    const cny = gold.cnyPerGram.toLocaleString('zh-CN', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    })
+    return `国际现货金约 **$${usd}/盎司** · 折合约 **¥${cny}/克**`
+  }
+  return `国际现货金约 **$${usd}/盎司**`
+}
+
 // API 全挂时的中文兜底
 const FALLBACK_QUOTES = [
   { text: '路漫漫其修远兮，吾将上下而求索。', author: '屈原《离骚》' },
@@ -857,12 +1054,28 @@ function renderNewsSection(title, items) {
   return lines
 }
 
-function buildContent({ weather, almanac, china, tech, world, quote, dateText }) {
+function buildContent({
+  weather,
+  almanac,
+  china,
+  tech,
+  world,
+  quote,
+  dateText,
+  greeting,
+  history,
+  gold
+}) {
   const lines = []
   const { today } = weather
 
   lines.push(`_${dateText}_`)
   lines.push('')
+  if (greeting) {
+    lines.push(`> ${greeting}`)
+    lines.push('')
+  }
+
   lines.push('## 💭 每日格言')
   lines.push(`> 「${quote.text}」`)
   lines.push(`> —— ${quote.author}`)
@@ -874,6 +1087,13 @@ function buildContent({ weather, almanac, china, tech, world, quote, dateText })
     `- 今日：${today.low}°C ~ ${today.high}°C · 湿度 ${today.humidity}% · 降水概率 ${today.rainProb}% · 风速 ${today.wind} km/h`
   )
   lines.push('')
+
+  const goldLine = formatGoldLine(gold)
+  if (goldLine) {
+    lines.push('## 💰 金价一瞥')
+    lines.push(`- ${goldLine}`)
+    lines.push('')
+  }
 
   lines.push('## 📜 今日黄历')
   if (almanac.lunar) {
@@ -893,6 +1113,17 @@ function buildContent({ weather, almanac, china, tech, world, quote, dateText })
     for (const d of almanac.upcoming) {
       const lunar = d.lunar ? `（农历${d.lunar}）` : ''
       lines.push(`- **${d.label}**${lunar}：${d.festivals.join('、')}`)
+    }
+  }
+  lines.push('')
+
+  lines.push('## 📅 历史上的今天')
+  if (!history?.length) {
+    lines.push('_暂无条目_')
+  } else {
+    for (const ev of history) {
+      const year = ev.year != null ? `**${ev.year}年** · ` : ''
+      lines.push(`- ${year}${ev.text}`)
     }
   }
   lines.push('')
@@ -1097,27 +1328,43 @@ async function main() {
   const slotLabel = slot === 'morning' ? '早报' : '晚报'
   console.log(`开始生成每日${slotLabel}...（BRIEF_SLOT=${slot}）`)
 
-  const [weather, almanac, china, tech, world, quote] = await Promise.all([
+  const [weather, almanac, china, tech, world, quote, history, gold] = await Promise.all([
     getWeather(),
     getAlmanac(),
     fetchNewsFromFeeds(FEEDS_CHINA, 10, slot),
     fetchNewsFromFeeds(FEEDS_TECH, 10, slot),
     fetchNewsFromFeeds(FEEDS_WORLD, 10, slot),
-    getDailyQuote()
+    getDailyQuote(),
+    getHistoryToday(4),
+    getGoldPrice()
   ])
 
+  const greeting = buildOpeningGreeting(slot, almanac.todayFestivals)
+
   console.log(
-    `抓取完成：${slotLabel} · 宜「${almanac.yi}」· 今日节日 ${almanac.todayFestivals.length} · 未来有节日 ${almanac.upcoming.length} 天 · 中国 ${china.length} · 科技 ${tech.length} · 全球 ${world.length}`
+    `抓取完成：${slotLabel} · 开场「${greeting}」· 宜「${almanac.yi}」· 今日节日 ${almanac.todayFestivals.length} · 历史 ${history.length} · 金价 ${gold ? `$${Math.round(gold.usdPerOz)}` : '无'} · 未来有节日 ${almanac.upcoming.length} 天 · 中国 ${china.length} · 科技 ${tech.length} · 全球 ${world.length}`
   )
 
   const dateText = todayLabel()
-  // 主题保留日期；正文不再重复大标题，以格言开场
+  // 主题保留日期；正文以开场问候 + 格言开篇
   const subject = `Rick的每日${slotLabel} · ${dateText}`
-  const content = buildContent({ weather, almanac, china, tech, world, quote, dateText })
+  const content = buildContent({
+    weather,
+    almanac,
+    china,
+    tech,
+    world,
+    quote,
+    dateText,
+    greeting,
+    history,
+    gold
+  })
 
   console.log('----- 预览 -----')
   console.log('主题:', subject)
   console.log('场次:', slotLabel)
+  console.log('开场:', greeting)
   console.log('格言:', `「${quote.text}」—— ${quote.author}`)
   console.log(content)
   console.log('---------------')
