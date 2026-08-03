@@ -1,7 +1,7 @@
 {
   "name": "daily-wechat-brief",
   "version": "1.0.0",
-  "description": "每日天气 + 资讯早报，通过 PushPlus 推送到个人微信",
+  "description": "每日天气 + 资讯早报，通过 WxPusher 推送到个人微信",
   "type": "module",
   "scripts": {
     "start": "node src/index.js",

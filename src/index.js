@@ -2,14 +2,14 @@
  * 每日微信早报
  * - 天气：Open-Meteo（免费免 key）
  * - 资讯：Hacker News Top + 少数派 RSS
- * - 推送：PushPlus → 个人微信
+ * - 推送：WxPusher → 个人微信（永久免费）
  */
 
-const CITY_NAME = process.env.CITY_NAME || '上海'
-const LATITUDE = process.env.LATITUDE || '31.23'
-const LONGITUDE = process.env.LONGITUDE || '121.47'
+const CITY_NAME = process.env.CITY_NAME || '青岛'
+const LATITUDE = process.env.LATITUDE || '36.07'
+const LONGITUDE = process.env.LONGITUDE || '120.38'
 const TIMEZONE = process.env.TIMEZONE || 'Asia/Shanghai'
-const PUSHPLUS_TOKEN = process.env.PUSHPLUS_TOKEN
+const WXPUSHER_SPT = process.env.WXPUSHER_SPT
 
 const WMO = {
   0: '晴',
@@ -160,24 +160,24 @@ function buildContent({ weather, hn, sspai }) {
 }
 
 async function pushToWechat(title, content) {
-  if (!PUSHPLUS_TOKEN) {
-    throw new Error('缺少 PUSHPLUS_TOKEN，请在 Secrets 或 .env 中配置')
+  if (!WXPUSHER_SPT) {
+    throw new Error('缺少 WXPUSHER_SPT，请在 Secrets 或 .env 中配置')
   }
 
-  const res = await fetch('https://www.pushplus.plus/send', {
+  const res = await fetch('https://wxpusher.zjiecode.com/api/send/message/simple-push', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      token: PUSHPLUS_TOKEN,
-      title,
-      content,
-      template: 'markdown'
+      spt: WXPUSHER_SPT,
+      summary: title.slice(0, 20),
+      content: `# ${title}\n\n${content}`,
+      contentType: 3 // markdown
     })
   })
 
   const data = await res.json()
-  if (data.code !== 200) {
-    throw new Error(`PushPlus 失败: ${JSON.stringify(data)}`)
+  if (data.code !== 1000) {
+    throw new Error(`WxPusher 失败: ${JSON.stringify(data)}`)
   }
   return data
 }
