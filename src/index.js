@@ -1,13 +1,8 @@
 /**
  * 每日资讯早/晚报
- * - 开场：按星期 / 节日切换问候语（早/晚场文案不同）
- * - 天气：Open-Meteo（今日）
- * - 金价：国际现货金一句话（美元/盎司 + 折合人民币/克）
- * - 黄历：今日宜忌 + 今日/未来七天节日（国内 + 国外主要国家，含节气）
- * - 历史上的今天：免费中文接口（维基百科备用）
- * - 资讯：中国新闻（前 5 条为前一天《新闻联播》要点，早/晚场错开）/ 科技 / 全球（RSS；英文自动译中；早/晚场错开）
- * - 格言：今日诗词 / 一言 API（中文；偶发英文会尝试翻译）
- * - 推送：SMTP 邮件（北京时间 08:30 / 18:10 各一次）
+ * - 早报：问候 + 格言 + 历史上的今天 + 冷知识 + 金价 + 天气 + 黄历/节日 + 生活精选 + 新闻×10
+ * - 晚报：问候 + 格言 + 天气/黄历速览 + HN/GitHub 热点 + 今日新增新闻×5
+ * - 推送：SMTP 邮件（北京时间 08:00 / 18:00）
  */
 
 import tls from 'node:tls'
@@ -1028,7 +1023,7 @@ async function fetchHistoryFromWikipedia(parts) {
     .filter(ev => ev.text)
 }
 
-async function getHistoryToday(limit = 4) {
+async function getHistoryToday(limit = 5) {
   const parts = getDateParts()
   let events = []
   try {
@@ -1123,9 +1118,163 @@ function formatGoldLine(gold) {
       minimumFractionDigits: 0,
       maximumFractionDigits: 0
     })
-    return `国际现货金约 **$${usd}/盎司** · 折合约 **¥${cny}/克**`
+    return `国际现货金约 **$${usd}/盎司** · 折合约 **¥${cny}/克**（参考，非投资建议）`
   }
-  return `国际现货金约 **$${usd}/盎司**`
+  return `国际现货金约 **$${usd}/盎司**（参考）`
+}
+
+const WIKI_UA = 'daily-wechat-brief/1.0 (personal digest; Node.js)'
+
+const FALLBACK_COLD_FACTS = [
+  {
+    title: '静默螺旋',
+    extract:
+      '人们若觉得自己的观点是少数，往往会选择沉默；沉默又让他人误判「多数意见」，于是少数意见越来越难发声。',
+    url: 'https://zh.wikipedia.org/wiki/%E6%B2%89%E9%BB%98%E8%9E%BA%E6%97%8B'
+  },
+  {
+    title: '邓巴数',
+    extract:
+      '人类能够维持稳定社交关系的人数大约在 150 人左右——大脑皮层大小似乎给「熟人圈」设了上限。',
+    url: 'https://zh.wikipedia.org/wiki/%E9%82%93%E5%B7%B4%E6%95%B0'
+  },
+  {
+    title: '巴纳姆效应',
+    extract:
+      '人们很容易把足够模糊、通用的性格描述当成「精准说中自己」，星座与伪心理测试常利用这一点。',
+    url: 'https://zh.wikipedia.org/wiki/%E5%B7%B4%E7%BA%B3%E5%A7%86%E6%95%88%E5%BA%94'
+  },
+  {
+    title: '蔡加尼克效应',
+    extract:
+      '未完成的任务比已完成的任务更容易被记住——大脑会一直惦记「还没做完的那件事」。',
+    url: 'https://zh.wikipedia.org/wiki/%E8%94%A1%E5%8A%A0%E5%B0%BC%E5%85%8B%E6%95%88%E5%BA%94'
+  },
+  {
+    title: '旁观者效应',
+    extract: '在场的人越多，每个人出手帮助的概率反而可能越低——责任被「稀释」了。',
+    url: 'https://zh.wikipedia.org/wiki/%E6%97%81%E8%A7%82%E8%80%85%E6%95%88%E5%BA%94'
+  }
+]
+
+/** 一条冷知识 / 百科词条（维基随机，失败用兜底） */
+async function getColdFact() {
+  try {
+    const data = await fetchJson('https://zh.wikipedia.org/api/rest_v1/page/random/summary', {
+      headers: { 'User-Agent': WIKI_UA, 'Api-User-Agent': WIKI_UA }
+    })
+    const title = String(data?.title || '').trim()
+    const extract = truncateText(String(data?.extract || '').replace(/\s+/g, ' '), 180)
+    if (title && extract) {
+      return {
+        title,
+        extract,
+        url: data.content_urls?.desktop?.page || data.content_urls?.mobile?.page || ''
+      }
+    }
+  } catch (e) {
+    console.warn('维基随机词条失败:', e.message)
+  }
+  const { d } = getDateParts()
+  return FALLBACK_COLD_FACTS[d % FALLBACK_COLD_FACTS.length]
+}
+
+/** 少数派 / 爱范儿 生活精选 1～2 条 */
+async function getLifestylePicks(limit = 2) {
+  const feeds = [
+    ['https://sspai.com/feed', '少数派'],
+    ['https://www.ifanr.com/feed', '爱范儿']
+  ]
+  const collected = []
+  const seen = new Set()
+
+  for (const [feed, source] of feeds) {
+    if (collected.length >= limit) break
+    try {
+      const items = await fetchRssFeed(feed, 4)
+      for (const item of items) {
+        const key = item.title.replace(/\s+/g, '').toLowerCase()
+        if (seen.has(key)) continue
+        seen.add(key)
+        collected.push({
+          ...item,
+          summary: item.summary ? `${source} · ${item.summary}` : source
+        })
+        break
+      }
+    } catch (e) {
+      console.warn(`生活精选失败 ${source}:`, e.message)
+    }
+  }
+  return collected.slice(0, limit)
+}
+
+/** 晚报：Hacker News ≈2 + GitHub Trending，共 3 条 */
+async function getGeekHot(limit = 3) {
+  const items = []
+
+  try {
+    const ids = await fetchJson('https://hacker-news.firebaseio.com/v0/topstories.json')
+    if (Array.isArray(ids)) {
+      for (const id of ids.slice(0, 10)) {
+        if (items.length >= 2) break
+        try {
+          const story = await fetchJson(
+            `https://hacker-news.firebaseio.com/v0/item/${id}.json`
+          )
+          if (!story?.title) continue
+          items.push({
+            title: story.title,
+            url: story.url || `https://news.ycombinator.com/item?id=${story.id}`,
+            summary: `Hacker News · ${story.score || 0} points`
+          })
+        } catch {
+          // 单条失败跳过
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Hacker News 失败:', e.message)
+  }
+
+  try {
+    const trending = await fetchRssFeed(
+      'https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml',
+      6
+    )
+    for (const item of trending) {
+      if (items.length >= limit) break
+      const key = item.title.replace(/\s+/g, '').toLowerCase()
+      if (items.some(x => x.title.replace(/\s+/g, '').toLowerCase() === key)) continue
+      items.push({
+        title: item.title,
+        url: item.url,
+        summary: item.summary ? `GitHub Trending · ${item.summary}` : 'GitHub Trending'
+      })
+    }
+  } catch (e) {
+    console.warn('GitHub Trending 失败:', e.message)
+  }
+
+  if (items.length < limit) {
+    try {
+      const hnRss = await fetchRssFeed('https://hnrss.org/frontpage', 5)
+      for (const item of hnRss) {
+        if (items.length >= limit) break
+        const key = item.title.replace(/\s+/g, '').toLowerCase()
+        if (items.some(x => x.title.replace(/\s+/g, '').toLowerCase() === key)) continue
+        items.push({
+          title: item.title,
+          url: item.url,
+          summary: item.summary ? `Hacker News · ${item.summary}` : 'Hacker News'
+        })
+      }
+    } catch (e) {
+      console.warn('HN RSS 兜底失败:', e.message)
+    }
+  }
+
+  return items.slice(0, limit)
 }
 
 // API 全挂时的中文兜底
@@ -1270,11 +1419,17 @@ function buildContent({
   quote,
   dateText,
   greeting,
-  history,
-  gold
+  slot,
+  history = [],
+  coldFact = null,
+  gold = null,
+  lifestyle = [],
+  geekHot = []
 }) {
   const lines = []
   const { today } = weather
+  const isEvening = slot === 'evening'
+  const goldLine = formatGoldLine(gold)
 
   lines.push(`_${dateText}_`)
   lines.push('')
@@ -1288,56 +1443,93 @@ function buildContent({
   lines.push(`> —— ${quote.author}`)
   lines.push('')
 
-  lines.push(`## 🌤 ${CITY_NAME} · 今日天气`)
-  lines.push(`- 现在：**${today.temp}°C** · ${today.desc}`)
-  lines.push(
-    `- 今日：${today.low}°C ~ ${today.high}°C · 湿度 ${today.humidity}% · 降水概率 ${today.rainProb}% · 风速 ${today.wind} km/h`
-  )
-  lines.push('')
-
-  const goldLine = formatGoldLine(gold)
-  if (goldLine) {
-    lines.push('## 💰 金价一瞥')
-    lines.push(`- ${goldLine}`)
+  if (isEvening) {
+    lines.push(`## 🌤 ${CITY_NAME} · 此刻`)
+    lines.push(
+      `- **${today.temp}°C** · ${today.desc} · ${today.low}°C ~ ${today.high}°C · 降水概率 ${today.rainProb}%`
+    )
     lines.push('')
-  }
 
-  lines.push('## 📜 今日黄历')
-  if (almanac.lunar) {
-    lines.push(`- 农历：${almanac.lunar}`)
-  }
-  lines.push(`- 宜：${almanac.yi}`)
-  lines.push(`- 忌：${almanac.ji}`)
-  lines.push(
-    `- 今日节日：${almanac.todayFestivals.length ? almanac.todayFestivals.join('、') : '无'}`
-  )
-  lines.push('')
+    lines.push('## 📜 黄历速览')
+    const fest =
+      almanac.todayFestivals.length > 0 ? almanac.todayFestivals.join('、') : '无'
+    lines.push(
+      `- ${almanac.lunar ? `农历${almanac.lunar} · ` : ''}宜 ${almanac.yi} · 忌 ${almanac.ji}`
+    )
+    lines.push(`- 今日节日：${fest}`)
+    lines.push('')
 
-  lines.push('## 🎉 未来七天节日')
-  if (!almanac.upcoming.length) {
-    lines.push('_未来七天暂无节日_')
+    lines.push(...renderNewsSection('🔥 极客热点 · HN / GitHub', geekHot))
+
+    lines.push('_以下为今日新增资讯（与早报错开选取）_')
+    lines.push('')
+    lines.push(...renderNewsSection('🇨🇳 中国新闻 · 今日新增', china))
+    lines.push(...renderNewsSection('💻 科技新闻 · 今日新增', tech))
+    lines.push(...renderNewsSection('🌍 全球大事 · 今日新增', world))
   } else {
-    for (const d of almanac.upcoming) {
-      const lunar = d.lunar ? `（农历${d.lunar}）` : ''
-      lines.push(`- **${d.label}**${lunar}：${d.festivals.join('、')}`)
+    lines.push('## 📅 历史上的今天')
+    if (!history.length) {
+      lines.push('_暂无内容_')
+      lines.push('')
+    } else {
+      for (const ev of history) {
+        const year = ev.year != null ? `**${ev.year}年** · ` : ''
+        lines.push(`- ${year}${ev.text}`)
+      }
+      lines.push('')
     }
-  }
-  lines.push('')
 
-  lines.push('## 📅 历史上的今天')
-  if (!history?.length) {
-    lines.push('_暂无条目_')
-  } else {
-    for (const ev of history) {
-      const year = ev.year != null ? `**${ev.year}年** · ` : ''
-      lines.push(`- ${year}${ev.text}`)
+    if (coldFact?.title) {
+      lines.push('## 💡 今日冷知识')
+      if (coldFact.url) {
+        lines.push(`> **[${coldFact.title}](${coldFact.url})** — ${coldFact.extract}`)
+      } else {
+        lines.push(`> **${coldFact.title}** — ${coldFact.extract}`)
+      }
+      lines.push('')
     }
-  }
-  lines.push('')
 
-  lines.push(...renderNewsSection('🇨🇳 中国新闻', china))
-  lines.push(...renderNewsSection('💻 科技新闻', tech))
-  lines.push(...renderNewsSection('🌍 全球大事', world))
+    if (goldLine) {
+      lines.push('## 🥇 今日金价')
+      lines.push(`- ${goldLine}`)
+      lines.push('')
+    }
+
+    lines.push(`## 🌤 ${CITY_NAME} · 今日天气`)
+    lines.push(`- 现在：**${today.temp}°C** · ${today.desc}`)
+    lines.push(
+      `- 今日：${today.low}°C ~ ${today.high}°C · 湿度 ${today.humidity}% · 降水概率 ${today.rainProb}% · 风速 ${today.wind} km/h`
+    )
+    lines.push('')
+
+    lines.push('## 📜 今日黄历')
+    if (almanac.lunar) {
+      lines.push(`- 农历：${almanac.lunar}`)
+    }
+    lines.push(`- 宜：${almanac.yi}`)
+    lines.push(`- 忌：${almanac.ji}`)
+    lines.push(
+      `- 今日节日：${almanac.todayFestivals.length ? almanac.todayFestivals.join('、') : '无'}`
+    )
+    lines.push('')
+
+    lines.push('## 🎉 未来七天节日')
+    if (!almanac.upcoming.length) {
+      lines.push('_未来七天暂无节日_')
+    } else {
+      for (const d of almanac.upcoming) {
+        const lunar = d.lunar ? `（农历${d.lunar}）` : ''
+        lines.push(`- **${d.label}**${lunar}：${d.festivals.join('、')}`)
+      }
+    }
+    lines.push('')
+
+    lines.push(...renderNewsSection('🍃 生活精选 · 少数派 / 爱范儿', lifestyle))
+
+    lines.push(...renderNewsSection('🇨🇳 中国新闻', china))
+    lines.push(...renderNewsSection('💻 科技新闻', tech))
+    lines.push(...renderNewsSection('🌍 全球大事', world))
+  }
 
   lines.push('---')
   lines.push('_由 GitHub Actions 自动发送 · daily-wechat-brief_')
@@ -1533,23 +1725,48 @@ ${markdownToHtml(content)}
 async function main() {
   const slot = resolveBriefSlot()
   const slotLabel = slot === 'morning' ? '早报' : '晚报'
-  console.log(`开始生成每日${slotLabel}...（BRIEF_SLOT=${slot}）`)
+  const isEvening = slot === 'evening'
+  // 早报每类 10 条；晚报做减法，每类 5 条「今日新增」
+  const newsLimit = isEvening ? 5 : 10
+  console.log(
+    `开始生成每日${slotLabel}...（BRIEF_SLOT=${slot}，新闻每类 ${newsLimit} 条）`
+  )
 
-  const [weather, almanac, china, tech, world, quote, history, gold] = await Promise.all([
+  const [weather, almanac, china, tech, world, quote, extras] = await Promise.all([
     getWeather(),
     getAlmanac(),
-    fetchChinaNews(10, slot),
-    fetchNewsFromFeeds(FEEDS_TECH, 10, slot),
-    fetchWorldNews(10, slot),
+    fetchChinaNews(newsLimit, slot),
+    fetchNewsFromFeeds(FEEDS_TECH, newsLimit, slot),
+    fetchWorldNews(newsLimit, slot),
     getDailyQuote(),
-    getHistoryToday(4),
-    getGoldPrice()
+    isEvening
+      ? getGeekHot(3).then(geekHot => ({
+          history: [],
+          coldFact: null,
+          gold: null,
+          lifestyle: [],
+          geekHot
+        }))
+      : Promise.all([
+          getHistoryToday(5),
+          getColdFact(),
+          getGoldPrice(),
+          getLifestylePicks(2)
+        ]).then(([history, coldFact, gold, lifestyle]) => ({
+          history,
+          coldFact,
+          gold,
+          lifestyle,
+          geekHot: []
+        }))
   ])
 
   const greeting = buildOpeningGreeting(slot, almanac.todayFestivals)
 
   console.log(
-    `抓取完成：${slotLabel} · 开场「${greeting}」· 宜「${almanac.yi}」· 今日节日 ${almanac.todayFestivals.length} · 历史 ${history.length} · 金价 ${gold ? `$${Math.round(gold.usdPerOz)}` : '无'} · 未来有节日 ${almanac.upcoming.length} 天 · 中国 ${china.length} · 科技 ${tech.length} · 全球 ${world.length}`
+    isEvening
+      ? `抓取完成：${slotLabel} · 开场「${greeting}」· 极客热点 ${extras.geekHot.length} · 中国 ${china.length} · 科技 ${tech.length} · 全球 ${world.length}`
+      : `抓取完成：${slotLabel} · 开场「${greeting}」· 历史 ${extras.history.length} · 冷知识 ${extras.coldFact ? 1 : 0} · 金价 ${extras.gold ? `$${Math.round(extras.gold.usdPerOz)}` : '无'} · 生活 ${extras.lifestyle.length} · 中国 ${china.length} · 科技 ${tech.length} · 全球 ${world.length}`
   )
 
   const dateText = todayLabel()
@@ -1564,8 +1781,8 @@ async function main() {
     quote,
     dateText,
     greeting,
-    history,
-    gold
+    slot,
+    ...extras
   })
 
   console.log('----- 预览 -----')
