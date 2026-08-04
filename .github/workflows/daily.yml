@@ -3,9 +3,9 @@ name: Rick的每日新闻
 on:
   schedule:
     # 北京时间 08:00 = UTC 00:00（早报）
-    - cron: '0 0 * * *'
+   - cron: '7 0 * * *'   # 08:07
     # 北京时间 18:00 = UTC 10:00（晚报）
-    - cron: '0 10 * * *'
+   - cron: '7 10 * * *'  # 18:07
   workflow_dispatch:
     inputs:
       brief_slot:
