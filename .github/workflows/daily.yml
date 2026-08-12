@@ -1,11 +1,7 @@
 name: Rick的每日新闻
 
 on:
-  schedule:
-    # 北京时间 08:00 = UTC 00:00（早报）
-   - cron: '7 0 * * *'   # 08:07
-    # 北京时间 18:00 = UTC 10:00（晚报）
-   - cron: '17 10 * * *'  # 18:07
+  # 定时触发由外部 cronjob 调用 workflow_dispatch API 完成，Action 自身不再定时
   workflow_dispatch:
     inputs:
       brief_slot:
@@ -30,6 +26,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Send daily brief
         env:

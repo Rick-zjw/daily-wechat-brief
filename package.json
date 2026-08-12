@@ -10,5 +10,8 @@
   "engines": {
     "node": ">=18"
   },
-  "private": true
+  "private": true,
+  "dependencies": {
+    "lunar-javascript": "^1.7.7"
+  }
 }
