@@ -7,6 +7,9 @@
 
 import tls from 'node:tls'
 import net from 'node:net'
+import lunarPkg from 'lunar-javascript'
+
+const { Solar } = lunarPkg
 
 const CITY_NAME = process.env.CITY_NAME || '青岛'
 const LATITUDE = process.env.LATITUDE || '36.07'
@@ -49,6 +52,8 @@ const WMO = {
 
 async function fetchJson(url, options = {}) {
   const res = await fetch(url, {
+    // 单个源最多等 15 秒，避免某个接口悬挂拖死整次运行
+    signal: options.signal || AbortSignal.timeout(15000),
     ...options,
     headers: {
       'User-Agent': 'daily-wechat-brief/1.0',
@@ -112,8 +117,19 @@ const GREETING_SOLAR = {
 }
 
 function todayGreetingFestivals() {
-  const { m, d } = getDateParts()
-  return GREETING_SOLAR[`${pad2(m)}-${pad2(d)}`] || []
+  const { y, m, d } = getDateParts()
+  const names = [...(GREETING_SOLAR[`${pad2(m)}-${pad2(d)}`] || [])]
+  // lunar-javascript 纯本地计算农历节日（春节/端午/中秋…）与节气，无需接口
+  try {
+    const solar = Solar.fromYmd(y, m, d)
+    const lunar = solar.getLunar()
+    names.push(...solar.getFestivals(), ...lunar.getFestivals())
+    const jieQi = lunar.getJieQi()
+    if (jieQi) names.push(jieQi)
+  } catch (e) {
+    console.warn('农历节日计算失败:', e.message)
+  }
+  return [...new Set(names)]
 }
 
 /** 每日一个技术名词（按「明天」日期轮换，早报预习、晚报复习） */
@@ -262,6 +278,26 @@ function getTechTermForDate(parts) {
 function getTomorrowTechTerm() {
   const tomorrow = addDays(getDateParts(), 1)
   return getTechTermForDate(tomorrow)
+}
+
+/** 从中文维基动态拉取名词释义作延伸阅读；失败则只用本地释义 */
+async function enrichTechTermFromWiki(term) {
+  try {
+    const data = await fetchJson(
+      `https://zh.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(term.term)}`,
+      { headers: { Accept: 'application/json' } }
+    )
+    if (data?.type === 'standard' && data?.extract) {
+      return {
+        ...term,
+        wikiExtract: truncateText(data.extract.replace(/\s+/g, ' '), 140),
+        wikiUrl: data?.content_urls?.desktop?.page || null
+      }
+    }
+  } catch (e) {
+    console.warn('技术名词维基释义失败:', e.message)
+  }
+  return term
 }
 
 function decodeXmlEntities(s) {
@@ -1127,12 +1163,21 @@ function renderNewsSection(title, items) {
 
 function renderTechTermSection(techTerm) {
   if (!techTerm?.term) return ['_暂无_', '']
-  return [
+  const lines = [
     `> **${techTerm.term}**（${techTerm.en}）`,
     `>`,
-    `> ${techTerm.def}`,
-    ''
+    `> ${techTerm.def}`
   ]
+  if (techTerm.wikiExtract) {
+    lines.push(`>`)
+    lines.push(
+      techTerm.wikiUrl
+        ? `> 📖 [维基百科](${techTerm.wikiUrl})：${techTerm.wikiExtract}`
+        : `> 📖 维基百科：${techTerm.wikiExtract}`
+    )
+  }
+  lines.push('')
+  return lines
 }
 
 function buildContent({
@@ -1434,9 +1479,8 @@ async function main() {
     `开始生成每日${slotLabel}...（BRIEF_SLOT=${slot}，新闻每类 ${newsLimit} 条）`
   )
 
-  const techTerm = getTomorrowTechTerm()
-
-  const [weather, china, tech, world, quote, extras] = await Promise.all([
+  const [techTerm, weather, china, tech, world, quote, extras] = await Promise.all([
+    enrichTechTermFromWiki(getTomorrowTechTerm()),
     getWeather(),
     fetchChinaNews(newsLimit, slot),
     fetchNewsFromFeeds(FEEDS_TECH, newsLimit, slot),
