@@ -977,7 +977,7 @@ async function getGeekHot(limit = 3) {
           items.push({
             title: story.title,
             url: story.url || `https://news.ycombinator.com/item?id=${story.id}`,
-            summary: `Hacker News · ${story.score || 0} points`
+            summary: `Hacker News · 热度 ${story.score || 0}`
           })
         } catch {
           // 单条失败跳过
@@ -1025,7 +1025,23 @@ async function getGeekHot(limit = 3) {
     }
   }
 
-  return items.slice(0, limit)
+  // 英文标题/描述译成中文；GitHub 仓库名（owner/repo）保留原名
+  const localized = []
+  for (const item of items.slice(0, limit)) {
+    let { title, summary } = item
+    const isRepoName = /^[\w.-]+\s*\/\s*[\w.-]+$/.test(title.trim())
+    if (!isRepoName && !isMostlyChinese(title)) {
+      const t = await translateToChinese(title)
+      if (t) title = t
+    }
+    const m = summary.match(/^(Hacker News|GitHub Trending)(?: · )?([\s\S]*)$/)
+    if (m && m[2] && /[a-z]{3,}/i.test(m[2]) && !isMostlyChinese(m[2])) {
+      const s = await translateToChinese(m[2])
+      if (s) summary = `${m[1]} · ${truncateText(s, 200)}`
+    }
+    localized.push({ ...item, title, summary })
+  }
+  return localized
 }
 
 // API 全挂时的中文兜底
