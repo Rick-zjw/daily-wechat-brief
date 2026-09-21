@@ -1,7 +1,7 @@
 /**
  * 每日资讯早/晚报
- * - 早报：问候 + 格言 + 历史上的今天 + 冷知识 + 金价 + 天气 + 技术名词 + 生活精选 + 新闻×10
- * - 晚报：问候 + 格言 + 天气速览 + 技术名词 + HN/GitHub 热点 + 今日新增新闻×5
+ * - 早报：问候 + 格言 + 历史上的今天 + 冷知识 + 金价 + 天气 + Shopify 技术资讯 + 生活精选 + 新闻×10
+ * - 晚报：问候 + 格言 + 天气速览 + Shopify 技术资讯 + HN/GitHub 热点 + 今日新增新闻×5
  * - 推送：SMTP 邮件（北京时间 08:00 / 18:00）
  */
 
@@ -130,174 +130,6 @@ function todayGreetingFestivals() {
     console.warn('农历节日计算失败:', e.message)
   }
   return [...new Set(names)]
-}
-
-/** 每日一个技术名词（按「明天」日期轮换，早报预习、晚报复习） */
-const TECH_TERMS = [
-  { term: '耦合', en: 'Coupling', def: '模块之间互相依赖的程度。耦合越高，改 A 越容易牵连 B；设计上通常追求「高内聚、低耦合」。' },
-  { term: '内聚', en: 'Cohesion', def: '一个模块内部职责有多「抱团」。内聚高意味着这个模块在做一件清晰的事，而不是大杂烩。' },
-  { term: '接口', en: 'Interface', def: '约定「能做什么」，不规定「怎么做」。调用方只依赖约定，实现可以替换（HTTP API、TypeScript interface、Java interface 都是这个思想）。' },
-  { term: '抽象', en: 'Abstraction', def: '隐藏细节、露出本质。好的抽象让你用更少概念完成更多事；坏的抽象则制造额外心智负担。' },
-  { term: '封装', en: 'Encapsulation', def: '把数据与操作它的逻辑收在一起，并限制外部乱摸内部状态。目的是降低误用与牵一发动全身。' },
-  { term: '重构', en: 'Refactoring', def: '在不改变对外行为的前提下，改善代码结构，让它更好读、更好改。重构不是加功能，而是还技术债。' },
-  { term: '幂等', en: 'Idempotent', def: '同一操作执行一次和执行多次，效果相同。支付回调、重试请求特别依赖幂等，避免重复扣款。' },
-  { term: '副作用', en: 'Side Effect', def: '函数除了返回值以外，还改了外部世界（写库、发请求、改全局变量）。副作用越多，越难测试与推理。' },
-  { term: '纯函数', en: 'Pure Function', def: '同样输入永远得到同样输出，且无副作用。纯函数好测、好缓存，也更容易并行。' },
-  { term: '不可变', en: 'Immutability', def: '数据创建后不再被修改，要改就生成新副本。能减少隐蔽共享状态带来的 bug。' },
-  { term: '并发', en: 'Concurrency', def: '系统能同时推进多个任务（未必真在同一瞬间执行）。关键是任务切换与协调，不等于并行。' },
-  { term: '并行', en: 'Parallelism', def: '多个任务在同一时刻真正一起跑（多核/多机）。并行是一种加速手段，并发是一种组织结构。' },
-  { term: '竞态条件', en: 'Race Condition', def: '结果依赖不可控的执行时序。两个请求同时改同一余额，就可能写出「看起来随机」的错账。' },
-  { term: '死锁', en: 'Deadlock', def: '多个持有者互相等待对方释放资源，于是永远等下去。常见于锁顺序不一致。' },
-  { term: '乐观锁', en: 'Optimistic Locking', def: '先假设不冲突，提交时用版本号/条件更新检查；冲突就重试。读多写少时常比悲观锁更香。' },
-  { term: '悲观锁', en: 'Pessimistic Locking', def: '先锁住再改，防止别人同时动同一行。冲突频繁时更稳，但吞吐可能变差。' },
-  { term: '事务', en: 'Transaction', def: '一组操作要么全部成功，要么全部回滚。经典目标是 ACID：原子、一致、隔离、持久。' },
-  { term: '最终一致性', en: 'Eventual Consistency', def: '不保证此刻处处相同，但保证在没有新更新后，副本们最终会一致。分布式系统常见取舍。' },
-  { term: '缓存', en: 'Cache', def: '用更快的介质保存热点结果，换延迟。核心难题是失效：什么时候认为这份数据过期了？' },
-  { term: '缓存击穿', en: 'Cache Breakdown', def: '热点 key 突然失效，大量请求打穿到数据库。常用互斥重建或逻辑过期缓解。' },
-  { term: '缓存穿透', en: 'Cache Penetration', def: '查询根本不存在的数据，缓存与库都没有，每次都打到库。可用布隆过滤器或缓存空值。' },
-  { term: '缓存雪崩', en: 'Cache Avalanche', def: '大量 key 同时过期或缓存整体宕机，流量洪峰打向后端。过期时间加抖动、多级缓存可减缓。' },
-  { term: '负载均衡', en: 'Load Balancing', def: '把请求分摊到多台实例。算法有轮询、加权、最少连接等；还要考虑会话与健康检查。' },
-  { term: '限流', en: 'Rate Limiting', def: '限制单位时间内的请求量，保护系统不被打垮。令牌桶、漏桶、滑动窗口都是常见实现。' },
-  { term: '熔断', en: 'Circuit Breaker', def: '下游持续失败时，快速失败并暂停调用，避免雪崩；过一段时间再试探恢复。' },
-  { term: '降级', en: 'Degradation', def: '系统吃紧时主动关掉非核心能力，保主流程可用。例如详情页先不展示推荐。' },
-  { term: '重试', en: 'Retry', def: '失败后再试一次。必须配合退避与幂等，否则可能把故障放大成风暴。' },
-  { term: '超时', en: 'Timeout', def: '等待超过阈值就放弃。没有超时的调用，会把故障无限传播给调用链上游。' },
-  { term: '消息队列', en: 'Message Queue', def: '用异步传递解耦生产者与消费者，削峰填谷。要清楚至少一次 / 至多一次 / 恰好一次语义。' },
-  { term: '事件驱动', en: 'Event-Driven', def: '组件通过事件通信，而不是直接互相调用。好处是解耦，代价是流程更难一眼看懂。' },
-  { term: '领域驱动设计', en: 'DDD', def: '用业务语言建模，把复杂业务拆成限界上下文。核心不是图案，而是对齐业务与代码边界。' },
-  { term: '单体', en: 'Monolith', def: '功能集中在一个可部署单元。简单场景 tar 很香；团队与规模上来后，发布与扩展会变痛。' },
-  { term: '微服务', en: 'Microservices', def: '按业务能力拆成可独立部署的服务。换来自治与扩展，也换来分布式复杂性。' },
-  { term: 'BFF', en: 'Backend for Frontend', def: '为特定前端（App/Web）定制的后端聚合层，减少前端拼装，也避免一个通用 API 伺候所有端。' },
-  { term: '网关', en: 'API Gateway', def: '流量入口：鉴权、路由、限流、观测常放这里。它是边界，不该变成第二个单体。' },
-  { term: 'REST', en: 'REST', def: '以资源与 HTTP 语义组织 API 的风格。好的 REST 强调清晰资源与统一接口，不只是「用了 JSON」。' },
-  { term: 'RPC', en: 'Remote Procedure Call', def: '像调用本地函数一样调用远程服务。性能与强类型友好，但要处理网络失败与版本兼容。' },
-  { term: 'GraphQL', en: 'GraphQL', def: '客户端声明需要哪些字段，服务端按需返回。减少 over-fetch，但要把复杂查询与缓存想清楚。' },
-  { term: 'Webhook', en: 'Webhook', def: '对方有事件时主动回调你的 HTTP 接口。务必验签、幂等，并快速响应后异步处理。' },
-  { term: 'CI/CD', en: 'CI/CD', def: '持续集成与持续交付/部署：自动构建测试，再可靠地发布。目标是让上线变成日常而非仪式。' },
-  { term: '技术债', en: 'Technical Debt', def: '为了短期速度留下的结构代价。可以借，但要付利息——不还就会拖慢所有后续改动。' },
-  { term: '观察性', en: 'Observability', def: '能否从输出推断系统内部状态。日志、指标、链路追踪是三件套，用来回答「为什么慢/为什么错」。' },
-  { term: 'SLO', en: 'Service Level Objective', def: '服务承诺的可量化目标，如可用性 99.9%。没有 SLO，稳定性讨论容易变成感觉之争。' },
-  { term: '错误预算', en: 'Error Budget', def: 'SLO 允许的失败额度。预算充足可加快发布；花光了就该优先稳，而不是继续堆功能。' },
-  { term: '蓝绿部署', en: 'Blue-Green Deployment', def: '两套环境切换流量完成发布，出问题可快速切回。代价是资源占用更高。' },
-  { term: '金丝雀发布', en: 'Canary Release', def: '先放一小部分真实流量验证新版本，再逐步放大。用真实用户当「矿工鸟」。' },
-  { term: '特征开关', en: 'Feature Flag', def: '用配置控制功能开闭，让发布与放量解耦。也能做紧急止血，但要治理旗标膨胀。' },
-  { term: '依赖注入', en: 'Dependency Injection', def: '不在内部 new 依赖，而从外部传入。便于替换实现与单测，是控制反转的一种常见形式。' },
-  { term: '控制反转', en: 'IoC', def: '「谁调用谁」的控制权反转：框架调用你的代码，而不是你处处指挥框架。DI 是其常见手段。' },
-  { term: '设计模式', en: 'Design Pattern', def: '可复用的设计经验命名。有用，但不要为了「看起来专业」硬套模式。' },
-  { term: '反模式', en: 'Anti-Pattern', def: '看起来像解法、长期却制造麻烦的做法。例如上帝对象、复制粘贴编程、过度工程。' },
-  { term: '上帝对象', en: 'God Object', def: '一个类知道/做了太多事。难测、难改、谁都不敢动——拆职责通常是出路。' },
-  { term: '单一职责', en: 'SRP', def: '一个模块应该只有一个引起它变化的理由。不是「只能有一个函数」，而是变化原因要单一。' },
-  { term: '开闭原则', en: 'OCP', def: '对扩展开放、对修改关闭。理想状态是加能力多靠新增代码，少去挖老代码的坑。' },
-  { term: '里氏替换', en: 'LSP', def: '子类型必须能替换父类型而不破坏程序正确性。继承用错时最容易违反。' },
-  { term: '接口隔离', en: 'ISP', def: '不要强迫调用方依赖它用不到的方法。小而专的接口，胜过大而全的「胖接口」。' },
-  { term: '依赖倒置', en: 'DIP', def: '高层模块不要依赖低层实现，双方都依赖抽象。这是可测试与可替换的基础。' },
-  { term: 'ORM', en: 'Object-Relational Mapping', def: '用对象操作映射到关系数据库。提升效率，但要懂 SQL，否则容易写出隐藏的性能陷阱。' },
-  { term: 'N+1 查询', en: 'N+1 Query', def: '先查列表，再在循环里逐条查关联，导致 1+N 次查询。典型性能杀手，预加载可解。' },
-  { term: '索引', en: 'Index', def: '加速查找的数据结构，但会增加写入成本与空间。没有银弹索引，要匹配真实查询模式。' },
-  { term: '范式', en: 'Normalization', def: '减少数据冗余与更新异常的设计方法。过度范式化可能换来复杂 JOIN，需权衡。' },
-  { term: '反范式', en: 'Denormalization', def: '故意保留冗余以换读取性能。适合读多写少，但要设计好同步与一致性策略。' },
-  { term: '分库分表', en: 'Sharding', def: '把数据按规则拆到多个库/表。能扩展容量，却让事务、关联查询与运维复杂很多。' },
-  { term: 'CQRS', en: 'Command Query Responsibility Segregation', def: '写模型与读模型分离。复杂领域里可读可写各自优化，但同步成本上升。' },
-  { term: '事件溯源', en: 'Event Sourcing', def: '存事件流而非只存最终状态，状态可重放得到。审计友好，心智与存储成本更高。' },
-  { term: 'Saga', en: 'Saga', def: '长流程分布式事务的一种模式：用一串本地事务 + 补偿动作，代替大而难的 XA。' },
-  { term: '两阶段提交', en: '2PC', def: '协调者先准备再提交的分布式事务协议。一致性强，但阻塞与单点问题让它在高并发下吃力。' },
-  { term: 'CAP', en: 'CAP Theorem', def: '分布式系统在分区发生时，一致性与可用性难以两全。工程上是取舍，不是三选二口号。' },
-  { term: 'BASE', en: 'BASE', def: '基本可用、软状态、最终一致。对比 ACID，更贴近大规模互联网系统的现实约束。' },
-  { term: 'TLS', en: 'Transport Layer Security', def: '传输层加密与身份校验，HTTPS 的基础。证书、握手、协议版本都会影响安全与性能。' },
-  { term: 'OAuth', en: 'OAuth', def: '授权框架：让第三方在不拿到你密码的情况下，获得有限访问权限。常见于「用 GitHub 登录」。' },
-  { term: 'JWT', en: 'JSON Web Token', def: '一种可验证的令牌格式，常用于无状态认证。好处是易扩展，风险是撤销与密钥管理。' },
-  { term: 'XSS', en: 'Cross-Site Scripting', def: '把恶意脚本注入到页面，在他人浏览器执行。输入转义与 CSP 是基本防线。' },
-  { term: 'CSRF', en: 'Cross-Site Request Forgery', def: '诱使已登录用户的浏览器发起非本意请求。SameSite Cookie、CSRF Token 可缓解。' },
-  { term: 'SQL 注入', en: 'SQL Injection', def: '把用户输入拼进 SQL 从而篡改查询。参数化查询是正道，拼接字符串是悬崖。' },
-  { term: '单元测试', en: 'Unit Test', def: '测最小可测单元，快且稳。好单元测试描述行为，而不是绑死实现细节。' },
-  { term: '集成测试', en: 'Integration Test', def: '测多个真实部件协作（DB、HTTP、队列）。比单测慢，但能抓到「接线」问题。' },
-  { term: '契约测试', en: 'Contract Test', def: '验证服务之间的接口约定是否被破坏。微服务里用来防止「我改了你崩了」。' },
-  { term: '回归测试', en: 'Regression Test', def: '确保老功能没被新改动弄坏。自动化回归是敢重构的底气。' },
-  { term: '代码异味', en: 'Code Smell', def: '不一定是 bug，但暗示设计可能有问题的信号：超长函数、重复逻辑、神秘命名等。' },
-  { term: '结对编程', en: 'Pair Programming', def: '两人共用一台电脑协作。短期看似慢，常能换来更少缺陷与更快知识传递。' },
-  { term: '代码评审', en: 'Code Review', def: '合并前同行检查。目标是共享质量与知识，而不是挑刺表演。' },
-  { term: '语义化版本', en: 'SemVer', def: '主.次.修订：不兼容变更 / 兼容新功能 / 兼容修复。让依赖升级可预期。' },
-  { term: '单体仓库', en: 'Monorepo', def: '多项目放一个仓库。利于统一工具链与原子跨库改动，也需要更强的工程约束。' },
-  { term: '树摇', en: 'Tree Shaking', def: '打包时移除未使用的导出代码。前提是 ESM 与副作用边界清晰。' },
-  { term: '懒加载', en: 'Lazy Loading', def: '用到再加载，降低首屏成本。路由拆分、图片占位都是常见形式。' },
-  { term: '防抖', en: 'Debounce', def: '高频触发时只认「停下来之后」那一次。搜索输入框很适合。' },
-  { term: '节流', en: 'Throttle', def: '固定间隔最多执行一次。滚动监听、按钮连点常用。' },
-  { term: '虚拟列表', en: 'Virtualization', def: '只渲染可视区域附近的列表项。长列表性能优化利器。' },
-  { term: 'SSR', en: 'Server-Side Rendering', def: '在服务器生成 HTML 再发给浏览器。利于首屏与 SEO，也带来服务端复杂度。' },
-  { term: 'CSR', en: 'Client-Side Rendering', def: '浏览器下载 JS 后再渲染页面。交互灵活，首屏与 SEO 需要额外策略。' },
-  { term: '水合', en: 'Hydration', def: 'SSR 出来的静态 HTML 被前端框架接管、绑定事件的过程。水合失败会表现为「点了没反应」。' },
-  { term: 'WebSocket', en: 'WebSocket', def: '全双工长连接，适合聊天、协作、实时推送。要处理重连、心跳与背压。' },
-  { term: 'SSE', en: 'Server-Sent Events', def: '服务器单向推流到浏览器。比 WebSocket 简单，适合通知与进度条。' },
-  { term: 'CDN', en: 'Content Delivery Network', def: '把静态资源放到离用户更近的节点。降延迟，也要处理好缓存刷新。' },
-  { term: 'DNS', en: 'Domain Name System', def: '把域名解析成 IP。看似基础设施，配置错误时能让你「全世界以为你挂了」。' },
-  { term: '容器', en: 'Container', def: '把应用与依赖打包进一致运行环境。Docker 是代表；关键是可重复交付。' },
-  { term: '编排', en: 'Orchestration', def: '管理大量容器的调度、自愈与发布。Kubernetes 是事实标准之一。' },
-  { term: '基础设施即代码', en: 'IaC', def: '用代码描述服务器与网络配置，而不是点控制台。可评审、可回滚、可复制。' },
-  { term: 'GitOps', en: 'GitOps', def: '以 Git 为真相来源驱动部署：仓库变更即期望状态。审计清晰，回滚也像 revert。' },
-  { term: '左移', en: 'Shift Left', def: '把测试、安全、质量检查尽量提前到开发早期做，修复成本通常更低。' },
-  { term: '右移', en: 'Shift Right', def: '在生产环境持续验证：监控、混沌工程、渐进发布。承认真实流量才是最终考场。' },
-  { term: '混沌工程', en: 'Chaos Engineering', def: '主动注入故障，验证系统是否按预期降级。不是捣乱，而是有实验假设的演练。' },
-  { term: '旁路缓存', en: 'Cache-Aside', def: '应用先读缓存，未命中再读库并回填。最常见缓存模式，失效策略要自己管。' },
-  { term: '读写分离', en: 'Read/Write Splitting', def: '主库写、从库读以扩展读能力。必须处理复制延迟导致的「刚写完读不到」。' },
-  { term: '连接池', en: 'Connection Pool', def: '复用数据库/HTTP 连接，避免频繁建连。池太小排队，池太大又压垮后端。' },
-  { term: '背压', en: 'Backpressure', def: '下游处理不过来时，向上游传递「慢一点」的信号。没有背压，内存与延迟会爆炸。' },
-  { term: '零拷贝', en: 'Zero-Copy', def: '减少数据在内存中的无谓复制，提升 I/O 性能。内核发送文件是经典场景。' },
-  { term: '垃圾回收', en: 'Garbage Collection', def: '自动回收不再使用的内存。方便，但停顿与调优是运行时必须理解的成本。' },
-  { term: '内存泄漏', en: 'Memory Leak', def: '不再需要的内存却无法释放。长时间运行服务会越来越慢直至 OOM。' },
-  { term: '栈与堆', en: 'Stack vs Heap', def: '栈多用于函数调用与局部，堆用于动态分配。搞不清生命周期，就容易悬空或泄漏。' },
-  { term: '时间复杂度', en: 'Time Complexity', def: '算法耗时随输入规模如何增长。O(n) 与 O(n²) 在数据变大时体感天差地别。' },
-  { term: '空间复杂度', en: 'Space Complexity', def: '算法额外内存随输入如何增长。有时用空间换时间，有时正好相反。' },
-  { term: '哈希', en: 'Hash', def: '把任意数据映射成固定长度摘要。用于字典、去重、校验；加密哈希还要求难逆推。' },
-  { term: '盐', en: 'Salt', def: '哈希密码前加入的随机值，让相同密码也有不同摘要，抵御彩虹表。' },
-  { term: '对称加密', en: 'Symmetric Encryption', def: '加解密用同一密钥。快，但密钥分发与保管是难点。' },
-  { term: '非对称加密', en: 'Asymmetric Encryption', def: '公钥加密、私钥解密（或反过来做签名）。慢，常与对称加密搭配使用。' },
-  { term: '数字签名', en: 'Digital Signature', def: '用私钥签名、公钥验签，证明「是谁说的」且「没被改过」。' },
-  { term: '零信任', en: 'Zero Trust', def: '默认不信任内外网，持续验证身份与设备。边界防火墙不再是唯一防线。' },
-  { term: '最小权限', en: 'Least Privilege', def: '只给完成工作所需的最少权限。泄露时爆炸半径更小。' },
-  { term: '特性切换', en: 'Feature Toggle', def: '同特征开关：用开关控制功能曝光。发布更安全，也要定期清理死亡开关。' },
-  { term: '约定优于配置', en: 'Convention over Configuration', def: '框架给合理默认，减少样板配置。效率高，但团队要共享同一套约定。' },
-  { term: 'YAGNI', en: 'You Aren\'t Gonna Need It', def: '不要为「也许以后用得上」过度设计。真需要时再加，往往更准。' },
-  { term: 'KISS', en: 'Keep It Simple, Stupid', def: '简单能用的方案优先。复杂系统最贵的往往不是写，而是理解与维护。' },
-  { term: 'DRY', en: 'Don\'t Repeat Yourself', def: '避免知识重复。但过早抽象也可能更糟——重复三次再抽，有时更稳。' },
-  { term: '关注点分离', en: 'Separation of Concerns', def: '不同的事放到不同的地方。UI、业务、存储搅在一起时，改动成本会指数上升。' }
-]
-
-function getTechTermForDate(parts) {
-  // 用年积日做稳定轮换，避免随机导致早报晚报不一致
-  const start = Date.UTC(parts.y, 0, 0)
-  const now = Date.UTC(parts.y, parts.m - 1, parts.d)
-  const dayOfYear = Math.round((now - start) / 86400000)
-  const item = TECH_TERMS[((dayOfYear % TECH_TERMS.length) + TECH_TERMS.length) % TECH_TERMS.length]
-  return {
-    ...item,
-    dateLabel: `${parts.y}-${pad2(parts.m)}-${pad2(parts.d)}`
-  }
-}
-
-/** 明天的技术名词（早报预习明天，晚报也可带上） */
-function getTomorrowTechTerm() {
-  const tomorrow = addDays(getDateParts(), 1)
-  return getTechTermForDate(tomorrow)
-}
-
-/** 从中文维基动态拉取名词释义作延伸阅读；失败则只用本地释义 */
-async function enrichTechTermFromWiki(term) {
-  try {
-    const data = await fetchJson(
-      `https://zh.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(term.term)}`,
-      { headers: { Accept: 'application/json' } }
-    )
-    if (data?.type === 'standard' && data?.extract) {
-      return {
-        ...term,
-        wikiExtract: truncateText(data.extract.replace(/\s+/g, ' '), 140),
-        wikiUrl: data?.content_urls?.desktop?.page || null
-      }
-    }
-  } catch (e) {
-    console.warn('技术名词维基释义失败:', e.message)
-  }
-  return term
 }
 
 function decodeXmlEntities(s) {
@@ -960,6 +792,83 @@ async function getLifestylePicks(limit = 2) {
   return collected.slice(0, limit)
 }
 
+const SHOPIFY_CHANGELOG_FEED = 'https://shopify.dev/changelog/feed.xml'
+const SHOPIFY_TAG_ZH = {
+  'Action Required': '需处理',
+  'Breaking API Change': '破坏性变更',
+  'Deprecation Announcement': '弃用',
+  'New': '新增',
+  'Update': '更新'
+}
+
+function parseShopifyChangelog(xml, limit = 20) {
+  const items = []
+  const blocks = xml.match(/<item[\s\S]*?<\/item>/gi) || []
+  for (const block of blocks) {
+    if (items.length >= limit) break
+    const title = stripHtml(extractTag(block, 'title')).replace(/`/g, '')
+    const url = extractLink(block)
+    const summary = truncateText(stripHtml(extractTag(block, 'description')), 180)
+    const tags = [...block.matchAll(/<category>([^<]+)<\/category>/gi)]
+      .map(m => decodeXmlEntities(m[1].trim()))
+      .filter(Boolean)
+    if (title && url) items.push({ title, url, summary, tags })
+  }
+  return items
+}
+
+function formatShopifyTags(tags = []) {
+  const mapped = []
+  const seen = new Set()
+  for (const tag of tags) {
+    if (tag === 'API' || tag === 'Changelog') continue
+    const label = SHOPIFY_TAG_ZH[tag] || tag
+    if (seen.has(label)) continue
+    seen.add(label)
+    mapped.push(label)
+    if (mapped.length >= 3) break
+  }
+  return mapped.join(' · ')
+}
+
+/** Shopify 开发者 changelog：API / Liquid / 主题 / 扩展等技术更新 */
+async function getShopifyDevNews(limit = 5, slot = 'morning') {
+  try {
+    const xml = await fetchJson(SHOPIFY_CHANGELOG_FEED)
+    const pool = parseShopifyChangelog(xml, Math.max(limit * 4, 16))
+    const techFirst = [...pool].sort((a, b) => {
+      const score = item => {
+        const tags = item.tags || []
+        let n = 0
+        if (tags.includes('Action Required')) n += 8
+        if (tags.includes('Breaking API Change')) n += 6
+        if (tags.includes('Deprecation Announcement')) n += 4
+        if (tags.some(t => /Liquid|Themes|Hydrogen|Functions|GraphQL|Storefront|Webhook|POS|Admin/i.test(t))) n += 2
+        if (tags.includes('App store')) n -= 3
+        return n
+      }
+      return score(b) - score(a)
+    })
+    const picked = selectNewsForSlot(techFirst.length ? techFirst : pool, slot, limit)
+    const localized = await localizeNewsItems(picked)
+    const translated = localized.filter(
+      (it, i) => it.title !== picked[i].title || it.summary !== picked[i].summary
+    ).length
+    if (translated) console.log(`Shopify 资讯：已翻译 ${translated} 条`)
+    return localized.map((item, i) => {
+      const tags = formatShopifyTags(picked[i].tags)
+      const body = item.summary || '点击标题查看 Shopify 开发者更新'
+      return {
+        ...item,
+        summary: tags ? `${tags} · ${body}` : `Shopify Dev · ${body}`
+      }
+    })
+  } catch (e) {
+    console.warn('Shopify 资讯失败:', e.message)
+    return []
+  }
+}
+
 /** 晚报：Hacker News ≈2 + GitHub Trending，共 3 条 */
 async function getGeekHot(limit = 3) {
   const items = []
@@ -1177,25 +1086,6 @@ function renderNewsSection(title, items) {
   return lines
 }
 
-function renderTechTermSection(techTerm) {
-  if (!techTerm?.term) return ['_暂无_', '']
-  const lines = [
-    `> **${techTerm.term}**（${techTerm.en}）`,
-    `>`,
-    `> ${techTerm.def}`
-  ]
-  if (techTerm.wikiExtract) {
-    lines.push(`>`)
-    lines.push(
-      techTerm.wikiUrl
-        ? `> 📖 [维基百科](${techTerm.wikiUrl})：${techTerm.wikiExtract}`
-        : `> 📖 维基百科：${techTerm.wikiExtract}`
-    )
-  }
-  lines.push('')
-  return lines
-}
-
 function buildContent({
   weather,
   china,
@@ -1210,7 +1100,7 @@ function buildContent({
   gold = null,
   lifestyle = [],
   geekHot = [],
-  techTerm = null
+  shopifyNews = []
 }) {
   const lines = []
   const { today } = weather
@@ -1236,8 +1126,7 @@ function buildContent({
     )
     lines.push('')
 
-    lines.push('## 📘 明日技术名词')
-    lines.push(...renderTechTermSection(techTerm))
+    lines.push(...renderNewsSection('🛍 Shopify 技术资讯', shopifyNews))
 
     lines.push(...renderNewsSection('🔥 极客热点 · HN / GitHub', geekHot))
 
@@ -1282,10 +1171,7 @@ function buildContent({
     )
     lines.push('')
 
-    lines.push('## 📘 明日技术名词')
-    lines.push('_明天工作可能会用上：_')
-    lines.push('')
-    lines.push(...renderTechTermSection(techTerm))
+    lines.push(...renderNewsSection('🛍 Shopify 技术资讯', shopifyNews))
 
     lines.push(...renderNewsSection('🍃 生活精选 · 少数派 / 爱范儿', lifestyle))
 
@@ -1491,12 +1377,13 @@ async function main() {
   const isEvening = slot === 'evening'
   // 早报每类 10 条；晚报做减法，每类 5 条「今日新增」
   const newsLimit = isEvening ? 5 : 10
+  const shopifyLimit = isEvening ? 3 : 5
   console.log(
     `开始生成每日${slotLabel}...（BRIEF_SLOT=${slot}，新闻每类 ${newsLimit} 条）`
   )
 
-  const [techTerm, weather, china, tech, world, quote, extras] = await Promise.all([
-    enrichTechTermFromWiki(getTomorrowTechTerm()),
+  const [shopifyNews, weather, china, tech, world, quote, extras] = await Promise.all([
+    getShopifyDevNews(shopifyLimit, slot),
     getWeather(),
     fetchChinaNews(newsLimit, slot),
     fetchNewsFromFeeds(FEEDS_TECH, newsLimit, slot),
@@ -1528,8 +1415,8 @@ async function main() {
 
   console.log(
     isEvening
-      ? `抓取完成：${slotLabel} · 开场「${greeting}」· 名词「${techTerm.term}」· 极客热点 ${extras.geekHot.length} · 中国 ${china.length} · 科技 ${tech.length} · 全球 ${world.length}`
-      : `抓取完成：${slotLabel} · 开场「${greeting}」· 名词「${techTerm.term}」· 历史 ${extras.history.length} · 冷知识 ${extras.coldFact ? 1 : 0} · 金价 ${extras.gold ? `$${Math.round(extras.gold.usdPerOz)}` : '无'} · 生活 ${extras.lifestyle.length} · 中国 ${china.length} · 科技 ${tech.length} · 全球 ${world.length}`
+      ? `抓取完成：${slotLabel} · 开场「${greeting}」· Shopify ${shopifyNews.length} · 极客热点 ${extras.geekHot.length} · 中国 ${china.length} · 科技 ${tech.length} · 全球 ${world.length}`
+      : `抓取完成：${slotLabel} · 开场「${greeting}」· Shopify ${shopifyNews.length} · 历史 ${extras.history.length} · 冷知识 ${extras.coldFact ? 1 : 0} · 金价 ${extras.gold ? `$${Math.round(extras.gold.usdPerOz)}` : '无'} · 生活 ${extras.lifestyle.length} · 中国 ${china.length} · 科技 ${tech.length} · 全球 ${world.length}`
   )
 
   const dateText = todayLabel()
@@ -1544,7 +1431,7 @@ async function main() {
     dateText,
     greeting,
     slot,
-    techTerm,
+    shopifyNews,
     ...extras
   })
   console.log('----- 预览 -----')
